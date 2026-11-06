@@ -1,0 +1,48 @@
+# Déploiement Netlify : site statique, aucune étape de build.
+[build]
+  publish = "."
+  command = ""
+
+# Le service worker doit toujours être revérifié, sinon les mises à jour n'arrivent pas.
+[[headers]]
+  for = "/sw.js"
+  [headers.values]
+    Cache-Control = "no-cache"
+    Service-Worker-Allowed = "/"
+
+[[headers]]
+  for = "/manifest.webmanifest"
+  [headers.values]
+    Content-Type = "application/manifest+json"
+
+# Modèles 3D : bon type MIME + cache d'une semaine
+[[headers]]
+  for = "/assets/models/*"
+  [headers.values]
+    Content-Type = "model/gltf-binary"
+    Cache-Control = "public, max-age=604800"
+
+# Three.js r160 ne change pas : cache long
+[[headers]]
+  for = "/vendor/*"
+  [headers.values]
+    Cache-Control = "public, max-age=2592000"
+
+[[headers]]
+  for = "/*"
+  [headers.values]
+    X-Content-Type-Options = "nosniff"
+    Referrer-Policy = "strict-origin-when-cross-origin"
+
+# Fichiers de développement local : non publiés
+[[redirects]]
+  from = "/.claude/*"
+  to = "/index.html"
+  status = 404
+  force = true
+
+[[redirects]]
+  from = "/deploy/*"
+  to = "/index.html"
+  status = 404
+  force = true

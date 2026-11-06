@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+  <meta name="theme-color" content="#14110e">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Deadsand">
+  <title>Deadsand</title>
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="icons/icon-192.png">
+  <link rel="stylesheet" href="style.css">
+  <!-- Three.js (moteur 3D) embarqué dans le dossier : le jeu fonctionne hors ligne -->
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "./vendor/three/build/three.module.js",
+      "three/addons/": "./vendor/three/examples/jsm/"
+    }
+  }
+  </script>
+</head>
+<body>
+  <canvas id="game"></canvas>
+  <canvas id="hud"></canvas>
+
+  <div id="hud-buttons" class="hidden">
+    <button id="btn-mute" class="icon-btn" aria-label="Activer / couper le son">🔊</button>
+    <button id="btn-pause" class="icon-btn" aria-label="Pause">⏸</button>
+  </div>
+  <button id="btn-roll" class="hidden" aria-label="Roulade">🌀</button>
+  <div id="hotbar" class="hidden"></div>
+  <div id="ctx-buttons">
+    <button id="btn-action" class="ctx-btn hidden"></button>
+    <button id="btn-next" class="ctx-btn next hidden"></button>
+  </div>
+  <div id="toast" aria-live="polite"></div>
+  <div id="tip" class="hidden" aria-live="polite"></div>
+  <div id="rotate" aria-hidden="true"><div class="phone"></div><p>Tournez votre téléphone</p><small>Deadsand se joue à l'horizontale</small></div>
+
+  <div id="loading"><div class="spinner"></div><p>Chargement…</p></div>
+  <div id="overlay" class="hidden"></div>
+  <div id="safe-probe" aria-hidden="true"></div>
+
+  <!-- Logique du jeu (scripts classiques) -->
+  <script src="js/config.js"></script>
+  <script src="js/utils.js"></script>
+  <script src="js/world.js"></script>
+  <script src="js/save.js"></script>
+  <script src="js/cosmetics.js"></script>
+  <script src="js/input.js"></script>
+  <script src="js/music.js"></script>
+  <script src="js/audio.js"></script>
+  <script src="js/entities.js"></script>
+  <script src="js/weapons.js"></script>
+  <script src="js/story.js"></script>
+  <script src="js/waves.js"></script>
+  <script src="js/allies.js"></script>
+  <script src="js/inventory.js"></script>
+  <script src="js/gunsmith.js"></script>
+  <script src="js/tips.js"></script>
+  <script src="js/daily.js"></script>
+  <script src="js/ui.js"></script>
+  <script src="js/main.js"></script>
+  <!-- Rendu 3D : charge les modèles puis démarre le jeu -->
+  <script type="module" src="js/render3d.js"></script>
+</body>
+</html>
