@@ -5,8 +5,26 @@ sur le parking d'un supermarché perdu dans le désert ; la carte s'agrandit au 
 vagues, des refuges permettent de souffler, et 4 pièces détachées vous séparent de la fuite.
 PC (clavier + souris) et téléphone (joystick tactile). Aucun build, fonctionne hors ligne, installable.
 
+## Lancer
+Servez le dossier avec un petit serveur web (modules + modèles 3D ne se chargent pas
+en `file://`) : `npx serve`, `python -m http.server`… puis ouvrez l'adresse.
+Tout est embarqué (Three.js dans `vendor/`), aucune connexion nécessaire.
+
 **Installer sur téléphone** : ouvrez la page dans Chrome (Android) → menu → « Installer
 l'application », ou Safari (iOS) → Partager → « Sur l'écran d'accueil ».
+
+## Publier sur Netlify
+Site 100 % statique : aucune compilation. `netlify.toml` règle le cache (service worker
+toujours revérifié, modèles 3D et Three.js mis en cache) et les types MIME.
+- **Le plus simple (Netlify Drop)** : connectez-vous sur https://app.netlify.com/drop et glissez
+  `deploy/deadsand-netlify.zip` (ou le dossier du jeu entier) dans la page. L'adresse publique
+  s'affiche en quelques secondes ; renommez-la dans *Site configuration → Change site name*.
+- **Mise à jour** : sur la page du site → *Deploys* → glissez la nouvelle version dans la zone
+  « Drag and drop ». Pensez d'abord à changer `VERSION` dans `sw.js` pour que les joueurs
+  reçoivent la mise à jour.
+- **En ligne de commande** : `npx netlify-cli deploy --prod --dir .`
+- **Depuis GitHub** : poussez le dossier dans un dépôt, puis *Add new site → Import an existing
+  project* ; laissez la commande de build vide et le dossier de publication sur `.`.
 
 ## Contrôles
 | | Déplacement | Ciblage | Roulade | Autres |
@@ -26,6 +44,81 @@ devant vous, où vous voulez. Grenades et drone restent automatiques.
 
 **Roulade** : courte, avec une jauge d'endurance de 3 charges (sous la survivante) qui se
 recharge en ~1 s par charge (`CONFIG.roll`).
+
+## Où améliorer quoi (une règle simple)
+| Où | Quand | Quoi | Monnaie |
+|---|---|---|---|
+| **Entraînement** (Préparation) | entre les parties | **la survivante** : vie, vitesse, aimant, ferraille, roulade, réanimations, Rex | réserve 🔩 |
+| **Établis** 🔧 + **Armurerie** (sur la carte) | en partie | **les armes** : pièces, nouvelles armes, niveaux, évolutions, peinture | ferraille de la partie |
+| **Refuges** (Pharmacie, Atelier, Hôpital) | en partie | **la survie** : soins, régénération, PV max, blindage, réflexes, vitesse, pièges, tourelles | ferraille de la partie |
+
+Il n'y a plus de choix d'amélioration en fin de vague : chaque vague repoussée rapporte une prime de
+ferraille (25 + 8 × n° de vague, CONFIG.waveScrap) à dépenser pendant la pause tactique.
+
+## Plaisir de jeu et envie de revenir
+- **Séries** (`js/fun.js`) : chaque élimination prolonge la série (2,6 s pour enchaîner) ; paliers annoncés
+  (SÉRIE 10, CARNAGE 25, MASSACRE 50, APOCALYPSE 100, LÉGENDAIRE 200) ; +10 % de ferraille par tranche de 10
+  (×2 max). Un coup reçu casse la série.
+- **Impacts** : morceaux qui volent, tête qui saute sur un coup critique fatal (HEADSHOT), ralenti sur la mort
+  d'un boss ou une explosion qui en tue 8+, léger tremblement à chaque tir.
+- **Coffres dorés** : les boss en lâchent deux, les élites parfois (`FUN.eliteChest`) → gerbe de ferraille.
+- **Bonus temporaires** (15 s, cristaux lumineux, `FUN.buffs`) : Frénésie (cadence ×2), Balles explosives, Adrénaline (vitesse).
+- **Défis de vague** (`CHALLENGES`) : une vague sur deux environ (vague 2+, hors boss), un petit défi avec prime.
+- **Établis** : en ressortant, onde dorée « ARME AMÉLIORÉE ! » et annonce de l'évolution débloquée.
+- **Niveau de survivante 1 → 50** (`js/progress.js`) : XP à chaque partie (même perdue), ferraille à chaque niveau,
+  objets du Garage débloqués par niveau (`level: N` dans cosmetics.js : peintures Nuit noire, Sang séché, Néon,
+  Diamant, traçantes violettes, mort « Plasma », peintures de voiture, titres).
+- **Missions** : 3 par jour + 1 par semaine (onglet 🎯 Missions), tirées de la date ; elles avancent à la fin de
+  chaque partie et la récompense est versée automatiquement.
+- **Bilan de fin de partie** : statistiques qui apparaissent une à une (meilleure série, dégâts, arme préférée,
+  coffres, défis), barre d'XP, niveaux gagnés, missions accomplies.
+- **Vega la mécano** : 4ᵉ personnage, débloqué en s'évadant : établis −25 %, tourelle offerte, +10 % de ferraille.
+- Outil de test (non publié) : `tools/autoplay.js`, un bot qui joue une partie accélérée et note les problèmes.
+
+## Contenu ajouté (zombies, capacités, cartes, manette, audio)
+- **Nouveaux zombies** (config.js) : Hurleur (vague 6+, hurle → zombies proches +50 % de vitesse 4 s), Porte-bouclier
+  (vague 8+, les balles de face font 12 % des dégâts : contournez-le ou faites-le sauter), Enfouisseur (vague 9+,
+  avance sous le sable, traînée visible, surgit près de vous). Les 3 derniers zombies d'une vague qui traîne s'enragent.
+- **Capacités** (`ABILITIES`, fun.js ; touche C / bouton à l'écran) : Mia grenade aveuglante, Kira sprint, Brick bouclier,
+  Vega tourelle express.
+- **Règles de partie** (onglet Équipe, `RUN_MODS` dans progress.js) : zombies enragés, élites, nuit éternelle, tempêtes,
+  refuges fermés, fragile, fusil à pompe imposé → bonus de ferraille et d'XP cumulés.
+- **Meilleures parties** : les 10 meilleures (onglet Succès).
+- **2ᵉ carte « Autoroute ensablée »** (`MAP_HIGHWAY` dans world.js), débloquée par une évasion ; choix dans l'onglet
+  Équipe (le jeu se recharge). Chaque carte définit ses établis, son générateur, ses lampadaires…
+- **Manette** (Xbox / PlayStation) : stick gauche, A roulade, B entrer, X grenade, Y capacité, LB mine, RB arme
+  suivante, Select vague, Start pause ; dans les menus A valider, B retour. Vibrations de la manette.
+- **Sons** des gros moments (série, coffre, bonus, capacité, niveau). **Vrais fichiers audio facultatifs** :
+  `assets/audio/manifest.json` → `{ "sfx": { "shoot": "sfx/shoot.ogg", … }, "volumes": {…}, "music": { "calm": "…", "action": "…" } }`.
+  Sans ce fichier, tout reste synthétisé.
+- **Soins** : plus de soin passif dans les refuges ; Rations limitées à 35 % de la vie par vague ; Seringue de rage
+  +1 PV / 3 zombies (4 PV/s max).
+## Menus
+- **Écran titre** : le parking en 3D, votre personnage à côté de la voiture → « Commencer ».
+- **Préparation** : onglets Équipe (personnages, aperçu 3D, caractéristiques),
+  Entraînement (bonus permanents achetés avec la réserve, avec un encart d'explication tant
+  que rien n'est achetable), Succès, Options (+ rappel des commandes), puis « Lancer la partie ».
+  En fin de partie, un encart signale ce que la ferraille versée vient de rendre achetable.
+- **Téléphone** : le jeu se joue à l'horizontale (plein écran + verrouillage quand le navigateur
+  le permet ; en vertical, un écran demande de tourner le téléphone et la partie se met en pause).
+- **Boss** à tour de rôle toutes les 5 vagues : Mastodonte, Reine (fait naître des zombies),
+  Bélier (charge en ligne droite, sonné contre un mur), Gerbeuse (bile et flaques acides).
+  **Événements** (vagues 3+) : horde de coureurs, ravitaillement parachuté.
+- **Son** : tirs, explosions et impacts en couches, grognements selon la distance de la horde,
+  vent du désert (plus fort pendant les tempêtes).
+- **Qualité auto** : si les images ralentissent, la résolution, le halo puis les ombres sont réduits.
+- **Garage** (personnalisation, aperçu 3D en direct) : tenues par personnage, peintures
+  d'armes, voiture (peinture, autocollants, pare-buffle, galerie, blindage), race et
+  accessoire de Rex, couleur des balles traçantes, effet de mort des zombies, traînée de
+  roulade, titre affiché avec le pseudo, ambiance du menu. Déblocage avec la ferraille, les
+  succès, des défis de personnage (500 zombies) ou un record de vague (`js/cosmetics.js`).
+- **Ferraille conservée** : en fin de partie, seule une part de la ferraille restante va en
+  réserve — 25 % à la vague 1, +5 % par vague, 80 % max, 100 % après une évasion
+  (`BANKING` dans config.js). Économiser puis abandonner tôt ne rapporte donc presque rien.
+- **Réanimation** : à la mort, la première réanimation est offerte (+1 par niveau
+  d'« Adrénaline » à l'Entraînement) ; les suivantes coûtent 150, 300, 600… 🔩 (ferraille de la
+  partie d'abord, puis la réserve). 9 s pour décider ; vous repartez à 60 % de vie avec une
+  onde de choc. Réglages dans `REVIVE` (config.js).
 
 ## Déroulé d'une partie
 - **Intro** : la voiture arrive en dérapage sur le parking (une touche ou un toucher pour passer).
@@ -58,6 +151,33 @@ recharge en ~1 s par charge (`CONFIG.roll`).
 - **Zombies** : Rôdeur, Coureur, Rampant, Brute, Cracheur, Kamikaze, Blindé, Mastodonte (boss) + élites.
 - **Fûts explosifs**, **bonus** (soin, bombe, aimant), **ferraille** en réserve → **Entraînement**
   (bonus permanents) et **personnages** (Mia, Kira, Brick), **succès**, options graphiques et sonores.
+
+## Structure
+```
+index.html            page, import map (Three.js local), ordre des scripts
+style.css             menus, cartes, boutons
+manifest.webmanifest  appli installable          sw.js   cache hors ligne
+assets/models/        personnages et zombie animés (glTF) ; world/ : bâtiments, véhicules, chien
+vendor/three/         Three.js r160 (copie locale)
+js/config.js          ★ DONNÉES : joueur, ennemis, vagues, améliorations, personnages, atelier, succès
+js/world.js           ★ CARTE : zones, bâtiments, refuges, obstacles ; collisions, ligne de vue, navigation
+js/story.js           ★ SCÉNARIO : intro, pauses, ouverture des zones, objectifs, refuges, fuite
+js/allies.js          chien, tourelles, barbelés
+js/weapons.js         ★ armes secondaires + évolutions
+js/gunsmith.js        ★ établis d'armurier : emplacements, pièces par arme, prix
+js/entities.js        logique : joueur, ciblage, roulade, zombies, explosions, fûts, bonus
+js/waves.js           vagues (nuit, horde finale), élites, tirage des améliorations
+js/ui.js              écrans (menus, refuges, victoire, boutons contextuels)
+js/main.js            machine à états + boucle de jeu + service worker
+js/render3d.js        rendu 3D : carte, éclairage jour/nuit/tempête, personnages, HUD, mini-carte
+```
+
+## Faire évoluer
+- **Zone / bâtiment / refuge** : `MAP.zones`, `MAP.buildings`, `SHELTERS` (world.js) ; achats dans `SHELTER_ITEMS` (story.js).
+- **Objectif** : entrée dans `OBJECTIVES` (story.js) — types `fetch`, `defend`, `hold`.
+- **Ennemi** : `ENEMY_TYPES` + `WAVE_CONFIG.weights` ; variante visuelle dans `ZOMBIE_TYPES` (render3d.js).
+- **Arme** : `WEAPONS` (weapons.js) + méthode du même nom dans `Weapons`.
+- Après une mise à jour publiée, changez `VERSION` dans `sw.js`.
 
 ## Crédits
 Modèles 3D par **Quaternius** (quaternius.com), licence **CC0**, via Poly Pizza :

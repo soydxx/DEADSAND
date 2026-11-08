@@ -621,6 +621,9 @@ function makeZombie(kind, elite) {
     for (const m of a.mats) m.color.lerp(new THREE.Color('#c8a070'), 0.35);
   }
   if (t.glow) { for (const m of a.mats) { m.emissive.set(t.glow); m.emissiveIntensity = 0.2; } }
+  // performances : seuls les boss projettent une vraie ombre (les autres gardent leur ombre douce au sol)
+  const bigShadow = !!t.glow || kind === 'behemoth';
+  a.root.traverse(o => { if (o.isMesh) o.castShadow = bigShadow; });
   return a;
 }
 
@@ -906,7 +909,10 @@ const Render = {
     this.probe = document.getElementById('safe-probe');
 
     const r = this.renderer = new THREE.WebGLRenderer({ canvas, antialias: !LOW, powerPreference: 'high-performance' });
-    r.setPixelRatio(Math.min(window.devicePixelRatio || 1, LOW ? 1.25 : 2));
+    // résolution : Haute = jusqu'à ×2 (écrans très fins), Auto = ×1,5 max (gros gain sur les écrans haute densité), Éco = ×1
+    r.setPixelRatio(Math.min(window.devicePixelRatio || 1, LOW ? 1 : Save.quality() === 'high' ? 2 : 1.5));
+    // machine modeste (peu de mémoire / de cœurs) en mode Auto : on part directement d'une résolution ×1
+    if (Save.quality() === 'auto' && ((navigator.deviceMemory && navigator.deviceMemory <= 4) || (navigator.hardwareConcurrency && navigator.hardwareConcurrency <= 4))) r.setPixelRatio(1);
     r.shadowMap.enabled = !LOW; r.shadowMap.type = THREE.PCFSoftShadowMap;
     r.toneMapping = THREE.ACESFilmicToneMapping; r.toneMappingExposure = 1.05;
     r.outputColorSpace = THREE.SRGBColorSpace;
@@ -1654,7 +1660,14 @@ const Render = {
         a.mixer.setTime(Math.random() * 2); // désynchronise les démarches
       }
       seen.add(a);
-      this.animateEnemy(a, e, g, dt);
+      // performances : un zombie hors de l'écran n'est ni dessiné ni animé (la carte est bien plus grande que la vue)
+      const v = this._pv || (this._pv = new THREE.Vector3());
+      v.set(toX(e.x), a.height * 0.5, toZ(e.y)).project(this.camera);
+      const onScreen = v.x > -1.25 && v.x < 1.25 && v.y > -1.3 && v.y < 1.3;
+      a.root.visible = onScreen;
+      if (!onScreen) { a.root.position.set(toX(e.x), 0, toZ(e.y)); a.skipDt = (a.skipDt || 0) + dt; continue; }
+      const adt = dt + Math.min(a.skipDt || 0, 0.5); a.skipDt = 0; // rattrape l'animation en revenant à l'écran
+      this.animateEnemy(a, e, g, adt);
     }
     // morts : animation de chute, puis ils s'enfoncent dans le sable
     for (const a of this.enemyModels) if (!seen.has(a)) {
@@ -2296,9 +2309,9 @@ const Render = {
     const now = performance.now(), ft = now - (this._lastFrame || now); this._lastFrame = now;
     if (Save.data.settings.quality !== 'auto' || g.state !== 'playing' || ft > 250) { this._aqT = 0; this._aqSum = 0; this._aqN = 0; return; }
     this._aqT = (this._aqT || 0) + ft; this._aqSum = (this._aqSum || 0) + ft; this._aqN = (this._aqN || 0) + 1;
-    if (this._aqT < 2500) return;
+    if (this._aqT < 2000) return;
     const avg = this._aqSum / this._aqN; this._aqT = 0; this._aqSum = 0; this._aqN = 0;
-    if (avg < 28) return;
+    if (avg < 21) return; // sous ~48 images/s : on allège d'un cran
     this.aqLevel = (this.aqLevel || 0) + 1;
     const r = this.renderer;
     if (this.aqLevel === 1) r.setPixelRatio(Math.max(1, r.getPixelRatio() * 0.75));
@@ -2543,7 +2556,16 @@ const Render = {
     if (p && (g.state === 'intro' || g.state === 'escape')) this.drawCinema(c, g);
     if (g.state === 'victory') { c.fillStyle = '#000'; c.fillRect(0, 0, this.vw, this.vh); }
     if (g.banner) this.drawBanner(c, g.banner);
-    if (g.state === 'playing') this.drawJoystick(c);  },
+    if (g.state === 'playing') this.drawJoystick(c);
+    if (Save.data.settings.fps) this.drawFps(c);  },
+
+  /** Compteur d'images par seconde (option des Paramètres) */
+  drawFps(c) {
+    const now = performance.now(), F = this._fps || (this._fps = { t: now, n: 0, v: 0 });
+    F.n++; if (now - F.t > 500) { F.v = Math.round(F.n * 1000 / (now - F.t)); F.t = now; F.n = 0; }
+    c.textAlign = 'left';
+    this.label(c, `${F.v} i/s`, this.vw / 2 + 64 * this.ui, 10 + this.safe.t + 10 * this.ui, 12 * this.ui, F.v >= 50 ? '#7dff6a' : F.v >= 30 ? '#ffd24a' : '#ff6a5a', FONT_UI, 0.2);
+  },
 
   /** Flèches au bord de l'écran vers les zombies hors champ (le boss toujours, en gros) */
   drawOffscreen(c, g) {

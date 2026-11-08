@@ -425,10 +425,11 @@ const UI = {
       <p class="hint">Échap (ou Start à la manette) met aussi la partie en pause.</p>
       <div class="opt"><span>Pseudo</span><input id="name-input" class="name-input" maxlength="16" placeholder="Survivante" value="${(Save.data.name || '').replace(/"/g, '&quot;')}"></div>
       <div class="opt"><span>Qualité graphique</span>${seg('quality', [['auto', 'Auto'], ['high', 'Haute'], ['low', 'Éco']])}</div>
-      <p class="hint">Économie : pour les téléphones modestes. ${inRun ? 'S\'appliquera au prochain lancement du jeu (la partie en cours n\'est pas interrompue).' : 'Appliqué au rechargement.'}</p>
+      <p class="hint">Si le jeu rame : choisissez <b>Éco</b> (sans ombres ni halo, résolution réduite). Économie : pour les téléphones et PC modestes. ${inRun ? 'S\'appliquera au prochain lancement du jeu (la partie en cours n\'est pas interrompue).' : 'Appliqué au rechargement.'}</p>
       <div class="opt"><span>Bruitages</span>${seg('sfx', vol)}</div>
       <div class="opt"><span>Musique</span>${seg('music', vol)}</div>
       <div class="opt"><span>Vibrations</span>${seg('vibrate', [[true, 'Oui'], [false, 'Non']])}</div>
+      <div class="opt"><span>Afficher les images/s</span>${seg('fps', [[false, 'Non'], [true, 'Oui']])}</div>
       <div class="opt"><span>Sons enregistrés</span>${seg('realSfx', [[false, 'Non'], [true, 'Oui']])}</div>
       <p class="hint">Remplace quelques bruitages (explosions, portes, capacités, fanfares) par des sons enregistrés (Kenney, CC0). Désactivé par défaut.</p>
       ${inRun ? '' : '<button class="btn small ghost" data-action="reload">Appliquer et recharger</button>'}
