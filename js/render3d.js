@@ -546,6 +546,9 @@ const ZOMBIE_TYPES = {
   queen:    { h: 128, tint: '#b89ad8', walk: 'Walk', speed: 0.6, glow: '#7a2aff' },
   charger:  { h: 136, tint: '#a8805a', walk: 'Walk', speed: 0.55, glow: '#ff5a1a' },
   spewer:   { h: 124, tint: '#c8d860', walk: 'Walk', speed: 0.5, glow: '#9aff2a' },
+  howler:   { h: 54, tint: '#c8a8e8', walk: 'Walk', speed: 0.95 },
+  shield:   { h: 56, tint: '#a8aa98', walk: 'Walk', speed: 0.7 },
+  burrower: { h: 46, tint: '#d8b080', walk: 'Run', speed: 1.1 },
 };
 
 function makeZombie(kind, elite) {
@@ -602,6 +605,20 @@ function makeZombie(kind, elite) {
     const belly = mesh(G.sphere(13), bellyMat, false); belly.position.set(0, 2, 8);
     attachToBone(a, 'Abdomen', belly) || a.root.add(belly);
     a.belly = belly; a.bellyMat = bellyMat;
+  }
+  if (kind === 'howler') { // gorge violette lumineuse + longs cheveux en mèches
+    const throat = mesh(G.sphere(3.4, 10, 8), glowMat('#c88aff', 2.4), false); throat.position.set(0, 2, 4);
+    attachToBone(a, 'Head', throat) || a.root.add(throat);
+    for (let i = 0; i < 5; i++) { const s = mesh(G.box(1, 9, 1), mat('#2a1a30', { r: 0.9 })); s.position.set(-4 + i * 2, 1, -4); s.rotation.x = 0.4; attachToBone(a, 'Head', s); }
+  }
+  if (kind === 'shield') { // bouclier anti-émeute tenu devant (dans le repère du zombie : avant = +z)
+    const sh = new THREE.Group(), plate = mesh(G.box(22, 30, 2), new THREE.MeshStandardMaterial({ color: '#2a3036', roughness: 0.35, metalness: 0.5 }));
+    const glass = mesh(G.box(14, 6, 2.2), new THREE.MeshStandardMaterial({ color: '#6a8aa8', roughness: 0.1, metalness: 0.4, transparent: true, opacity: 0.7 })); glass.position.y = 9;
+    const txt = mesh(G.box(16, 3, 2.3), mat('#e8e8e8', { r: 0.6 })); txt.position.y = -2;
+    sh.add(plate, glass, txt); sh.position.set(0, 20, 13); a.root.add(sh); a.shieldObj = sh;
+  }
+  if (kind === 'burrower') { // couvert de sable, griffes
+    for (const m of a.mats) m.color.lerp(new THREE.Color('#c8a070'), 0.35);
   }
   if (t.glow) { for (const m of a.mats) { m.emissive.set(t.glow); m.emissiveIntensity = 0.2; } }
   return a;
@@ -1109,7 +1126,9 @@ const Render = {
       ring.position.set(toX(fx), 0.8, toZ(fy)); s.add(ring);
       const gh = buildGun('rifle', { metal: holo, wood: holo }); gh.traverse(o => { if (o.isMesh) { o.material = holo; o.castShadow = false; } });
       gh.scale.setScalar(1.15); gh.position.set(toX(b.x), 52, toZ(b.y)); s.add(gh);
-      const sign = this.makeSign('🔧 ÉTABLI', 'AMÉLIORER L\'ARME', '#ff9a2a'); sign.scale.setScalar(0.55); sign.position.set(toX(b.x), 70, toZ(b.y) + 2); s.add(sign);
+      const sign = b.big ? this.makeSign('🔫 ARMURERIE', 'ARMES · PIÈCES · PEINTURES', '#ffc21a') : this.makeSign('🔧 ÉTABLI', 'AMÉLIORER L\'ARME', '#ff9a2a');
+      sign.scale.setScalar(b.big ? 0.85 : 0.55); sign.position.set(toX(b.x), b.big ? 78 : 70, toZ(b.y) + 2); s.add(sign);
+      if (b.big) gh.scale.setScalar(1.6);
       this.benchFx.push({ b, ring, holo: gh, sign });
     }
     // détails sans collision : caddies, cônes, tentes, mirador, feux, graffitis, panneaux…
@@ -1160,7 +1179,7 @@ const Render = {
     // détails sans collision : lampadaires, gravats, arbres morts, sacs de sable
     const lampM = mat('#4a4844', { r: 0.6, m: 0.5 });
     this.lamps = [];
-    for (const [x, y] of [[880, 1060], [1520, 1060], [880, 1540], [1520, 1540], [880, 380], [1520, 380], [1700, 700], [2300, 300]]) {
+    for (const [x, y] of MAP.lamps) {
       const lp = new THREE.Group();
       const post = mesh(G.cyl(1.4, 2, 80, 8), lampM); post.position.y = 40; lp.add(post);
       const arm = mesh(G.box(22, 2, 2), lampM); arm.position.set(10, 80, 0); lp.add(arm);
@@ -1175,7 +1194,7 @@ const Render = {
       const rk = mesh(new THREE.DodecahedronGeometry(r, 0), rubble[i % 3], true, true);
       rk.position.set(toX(x), r * 0.3, toZ(y)); rk.scale.set(rnd(0.8, 1.6), rnd(0.4, 0.9), rnd(0.8, 1.5)); rk.rotation.set(rnd(0, 3), rnd(0, 3), rnd(0, 3)); s.add(rk);
     }
-    for (const [x, y] of [[1700, 1350], [1720, 1380], [2250, 1000], [2270, 1030], [1650, 300], [1670, 330]]) {
+    for (const [x, y] of MAP.sandbags) {
       for (let k = 0; k < 4; k++) { const sb = mesh(G.capsule(4.5, 9), sandbag, true, true); sb.rotation.set(0, 0.2, Math.PI / 2); sb.position.set(toX(x) + k * 16 - 24, 4 + (k % 2) * 0.5, toZ(y)); s.add(sb); }
     }
 
@@ -1298,7 +1317,7 @@ const Render = {
     this.contactMat = new THREE.MeshBasicMaterial({ color: '#000000', alphaMap: this.dotTex, transparent: true, opacity: 0.45, depthWrite: false });
     this.contactGeo = new THREE.PlaneGeometry(1, 1).rotateX(-Math.PI / 2);
     // pools d'objets réutilisés
-    this.pools = { tracer: [], orb: [], nut: [], warn: [], barrel: [], grenade: [], mine: [], drone: [], fire: [], medkit: [], bomb: [], magnet: [], ring: [], turret: [], trap: [], gascan: [], battery: [], gen: [], zone: [], crate: [], acid: [] };
+    this.pools = { tracer: [], orb: [], nut: [], warn: [], barrel: [], grenade: [], mine: [], drone: [], fire: [], medkit: [], bomb: [], magnet: [], chest: [], frenzy: [], explosive: [], haste: [], ring: [], turret: [], trap: [], gascan: [], battery: [], gen: [], zone: [], crate: [], acid: [] };
     // traces au sol (zombies abattus, explosions) : persistent puis s'estompent
     this.decals = [];
     this.splatTex = canvasTex(128, (x, S) => {
@@ -1769,12 +1788,23 @@ const Render = {
       body.add(mesh(G.sphere(6, 14, 10), mat('#222222', { r: 0.35, m: 0.4 })));
       const f = mesh(G.cyl(0.6, 0.6, 4, 6), mat('#8a6a3a')); f.position.y = 7; body.add(f);
       const sp = mesh(G.sphere(1.4, 8, 6), glowMat('#ffb030', 5), false); sp.position.y = 9.2; body.add(sp);
+    } else if (kind === 'chest') { // coffre doré : caisse dorée cerclée de métal, lueur sous le couvercle
+      const gold = mat('#e8b030', { r: 0.3, m: 0.75, e: '#5a3a00' }), band = mat('#3a2a1a', { r: 0.6, m: 0.4 });
+      body.add(mesh(G.box(14, 8, 10), gold));
+      const lid = mesh(G.box(14.4, 3, 10.4), gold); lid.position.y = 5.6; body.add(lid);
+      for (const x of [-5, 5]) { const b = mesh(G.box(1.4, 11.4, 10.8), band); b.position.set(x, 1.4, 0); body.add(b); }
+      const lock = mesh(G.box(2.4, 3, 1), mat('#2a2a2a', { m: 0.6 })); lock.position.set(0, 3, 5.4); body.add(lock);
+      const glow = mesh(G.box(13, 0.8, 9.6), glowMat('#ffe08a', 4), false); glow.position.y = 4.2; body.add(glow);
+      body.scale.setScalar(1.15);
+    } else if (FUN.buffs[kind]) { // bonus temporaire : cristal lumineux qui tourne
+      const b = FUN.buffs[kind], cr = mesh(new THREE.OctahedronGeometry(6, 0), glowMat(b.color, 2.6), false); cr.scale.y = 1.5; body.add(cr);
+      const core = mesh(new THREE.OctahedronGeometry(3, 0), glowMat('#ffffff', 3), false); core.scale.y = 1.5; body.add(core);
     } else { // aimant
       const red = mat('#d8282a', { r: 0.4, m: 0.3 }), steel = mat('#d8d8d8', { r: 0.3, m: 0.7 });
       const u = mesh(new THREE.TorusGeometry(5, 1.8, 8, 16, Math.PI), red); u.rotation.z = Math.PI; body.add(u);
       for (const s of [-1, 1]) { const tip = mesh(G.box(3.6, 3, 3.6), steel); tip.position.set(s * 5, 1.5, 0); body.add(tip); }
     }
-    const colors = { medkit: '#7dff6a', bomb: '#ff8a3a', magnet: '#ffd24a' };
+    const colors = { medkit: '#7dff6a', bomb: '#ff8a3a', magnet: '#ffd24a', chest: '#ffd24a', frenzy: FUN.buffs.frenzy.color, explosive: FUN.buffs.explosive.color, haste: FUN.buffs.haste.color };
     const halo = new THREE.Mesh(new THREE.RingGeometry(0.75, 1, 32).rotateX(-Math.PI / 2), new THREE.MeshBasicMaterial({ color: new THREE.Color(colors[kind]).multiplyScalar(1.8), transparent: true, opacity: 0.8, depthWrite: false }));
     halo.position.y = 0.9; gr.add(halo);
     gr.userData = { body, halo };
@@ -1867,7 +1897,7 @@ const Render = {
         return gr;
       });
       o.position.set(toX(m.x), 1.3, toZ(m.y));
-      o.userData.led.visible = m.arm > 0 ? Math.sin(g.time * 10) > 0 : Math.sin(g.time * 4 + m.x) > 0;
+      o.userData.led.visible = m.arm > 0 ? Math.sin(g.time * 10) > 0 : m.age > MINE_LIFE - 5 ? Math.sin(g.time * 18) > 0 : Math.sin(g.time * 4 + m.x) > 0; // clignote vite avant de s'éteindre
     }
     // drones en orbite
     for (const d of g.drones) {
@@ -2213,7 +2243,7 @@ const Render = {
       if (q.puff) N.add(x, q.ground ? 3 : 10 + (1 - a) * 12, z, col(q.pc || '#f2dcb6'), q.size * (q.ground ? 3.2 : 3.6), a * (q.ground ? 0.4 : 0.55));
       else if (q.star) { A.add(x, 20, z, col(q.color), q.size * 3.5 * (1.2 - a), a * 0.9); }
       else if (q.petal) A.add(x, 10 + 90 * a, z, col(q.color), q.size * 2.2, Math.min(1, a * 3) * 0.9); // braises qui retombent
-      else if (q.casing) N.add(x, 1 + q.z, z, col(q.color), 4.5, Math.min(1, a * 3));
+      else if (q.casing) N.add(x, 1 + q.z, z, col(q.color), q.gib ? q.size * 2.8 : 4.5, Math.min(1, a * 3)); // douilles et morceaux
       else if (q.flame) {
         A.add(x, 14 + (1 - a) * 10, z, col(q.color), q.size * 3.2, a * 0.85);
         if (Math.random() < 0.15) N.add(x, 22 + (1 - a) * 18, z, col('#3a3028'), q.size * 4, a * 0.25); // fumée
@@ -2509,7 +2539,7 @@ const Render = {
     const inGame = p && ['playing', 'paused', 'upgrade', 'dying'].includes(g.state);
     if (inGame) this.drawWorldMarks(c, g);
     if (p && (g.state === 'playing' || g.state === 'paused')) this.drawOffscreen(c, g);
-    if (inGame) { this.drawHud(c, g); this.drawObjective(c, g); this.drawMinimap(c, g); }
+    if (inGame) { this.drawHud(c, g); this.drawObjective(c, g); this.drawMinimap(c, g); this.drawFun(c, g); }
     if (p && (g.state === 'intro' || g.state === 'escape')) this.drawCinema(c, g);
     if (g.state === 'victory') { c.fillStyle = '#000'; c.fillRect(0, 0, this.vw, this.vh); }
     if (g.banner) this.drawBanner(c, g.banner);
@@ -2635,8 +2665,22 @@ const Render = {
       this.label(c, line1, x + 10 * u, y + 28 * u, 12 * u, '#ffc21a', FONT_UI, 0.2);
       this.label(c, line2, x + 10 * u, y + 42 * u, 10.5 * u, '#e8e2d6', FONT_UI, 0.2);
     }
-    if (g.daily) { c.textAlign = 'left'; this.label(c, `🗓️ Défi : ${Daily.today().mods.map(m => m.icon).join(' ')}`, x, y + h + 12 * u, 11 * u, '#ffc21a', FONT_UI, 0.2); }
+    // défi de vague : sous l'objectif
+    const ch = g.challenge;
+    if (ch) {
+      const t1 = `${ch.def.icon} ${ch.text}`, t2 = ch.done ? `✔ Réussi · +${ch.reward} 🔩` : `${Math.floor(ch.n)} / ${ch.goal} · prime ${ch.reward} 🔩`;
+      c.font = `800 ${11 * u}px ${FONT_UI}`;
+      const cw = Math.max(c.measureText(t1).width, c.measureText(t2).width) + 22 * u, cy2 = y + h + 6 * u, chh = 38 * u;
+      this.plate(c, x, cy2, cw, chh, 9);
+      c.fillStyle = ch.done ? '#7dff6a' : '#3ad6ff'; this.rr(c, x, cy2, 3.5 * u, chh, 2); c.fill();
+      if (!ch.done) { const k = U.clamp(ch.n / ch.goal, 0, 1); c.fillStyle = 'rgba(58,214,255,0.25)'; this.rr(c, x + 4 * u, cy2 + chh - 5 * u, (cw - 8 * u) * k, 3 * u, 1.5); c.fill(); }
+      c.textAlign = 'left';
+      this.label(c, t1, x + 10 * u, cy2 + 12 * u, 11 * u, '#e8f8ff', FONT_UI, 0.2);
+      this.label(c, t2, x + 10 * u, cy2 + 26 * u, 10.5 * u, ch.done ? '#7dff6a' : '#8adcff', FONT_UI, 0.2);
+    }
     if (g.night) { c.textAlign = 'left'; this.label(c, '🌙 Nuit', x + w + 8 * u, y + 12 * u, 11 * u, '#9ab8ff', FONT_UI, 0.2); }
+    const ms = Object.keys(g.mods || {}); // règles choisies
+    if (ms.length) { c.textAlign = 'left'; this.label(c, `⚙️ ${RUN_MODS.filter(m => g.mods[m.id]).map(m => m.icon).join('')} +${Math.round((g.modBonus || 0) * 100)} %`, x + w + 8 * u, y + 44 * u, 11 * u, '#ffb070', FONT_UI, 0.2); }
     if (g.storm) { c.textAlign = 'left'; this.label(c, '🌪️ Tempête', x + w + 8 * u, y + (g.night ? 28 : 12) * u, 11 * u, '#ffb070', FONT_UI, 0.2); }
   },
 
@@ -2668,6 +2712,7 @@ const Render = {
     c.fillStyle = '#e8e8e8'; c.fillRect(x + (MAP.car.x - 10) * k, y + (MAP.car.y - 20) * k, 20 * k, 40 * k);
     c.fillStyle = '#ff3a2a';
     for (const e of g.enemies) { const s = e.def.boss ? 3.5 : 1.6; c.fillRect(x + e.x * k - s / 2 * u, y + e.y * k - s / 2 * u, s * u, s * u); }
+    for (const b2 of g.burrowers || []) { c.fillStyle = '#c8a070'; c.fillRect(x + b2.x * k - 1.2 * u, y + b2.y * k - 1.2 * u, 2.4 * u, 2.4 * u); } // enfouisseurs
     for (const cr of g.crates || []) { c.fillStyle = '#7dff6a'; c.fillRect(x + cr.x * k - 2.5 * u, y + cr.y * k - 2.5 * u, 5 * u, 5 * u); } // ravitaillement
     const o = g.objective;
     const op = o && (o.type === 'fetch' ? (o.item.carried ? MAP.car : o.item) : o.gen || o.at);
@@ -2756,6 +2801,42 @@ const Render = {
       const hx = U.clamp(CONFIG.touch.zone === 'left' ? this.vw / 4 : this.vw / 2, half, this.vw - half);
       c.textAlign = 'center';
       this.label(c, msg, hx, this.vh - 70 - this.safe.b, 14 * u, '#ffffff', FONT_UI);
+      c.globalAlpha = 1;
+    }
+  },
+
+  /** Série (combo), bonus temporaires (sous la mini-carte) et grande annonce des paliers au centre */
+  drawFun(c, g) {
+    const u = this.ui, narrow = this.vw < 600, mw = (narrow ? 104 : 150) * u, right = this.vw - 12 - (this.safe.r || 0);
+    let y = 10 + this.safe.t + 50 * u + mw * MAP.H / MAP.W + 14 * u;
+    const cb = g.combo;
+    if (cb && cb.n >= 3) {
+      const tier = [...FUN.combo.tiers].reverse().find(([n]) => cb.n >= n), col = tier ? tier[2] : '#ffffff';
+      const s = 1 + cb.pop * 0.35, w = 138 * u, h = 44 * u, x = right - w;
+      this.plate(c, x, y, w, h, 10);
+      c.textAlign = 'center';
+      this.label(c, `×${cb.n}`, x + w / 2, y + 16 * u, 20 * u * s, col);
+      this.label(c, `SÉRIE · 🔩 ×${FUN.combo.scrap(cb.n).toFixed(1)}`, x + w / 2, y + 32 * u, 9.5 * u, '#e8e2d6', FONT_UI, 0.2);
+      c.fillStyle = col; this.rr(c, x + 6 * u, y + h - 5 * u, (w - 12 * u) * U.clamp(cb.t / FUN.combo.window, 0, 1), 3 * u, 1.5); c.fill();
+      y += h + 6 * u;
+    }
+    for (const [k, t] of Object.entries(g.buffs || {})) {
+      const b = FUN.buffs[k], w = 138 * u, h = 26 * u, x = right - w;
+      this.plate(c, x, y, w, h, 8);
+      c.fillStyle = b.color; this.rr(c, x, y + h - 4 * u, w * U.clamp(t / b.dur, 0, 1), 4 * u, 2); c.fill();
+      c.textAlign = 'left';
+      this.label(c, `${b.icon} ${b.name}`, x + 7 * u, y + 11 * u, 9.5 * u, b.color, FONT_UI, 0.2);
+      c.textAlign = 'right'; this.label(c, `${Math.ceil(t)} s`, x + w - 7 * u, y + 11 * u, 10 * u, '#ffffff', FONT_UI, 0.2);
+      y += h + 5 * u;
+    }
+    // palier de série / bonus / défi réussi : grand texte au centre qui claque puis s'efface
+    const pp = g.comboPop;
+    if (pp) {
+      const t = pp.t, a = Math.min(1, t / 0.08, (1.8 - t) / 0.4), s = t < 0.15 ? 1.6 - t / 0.15 * 0.6 : 1;
+      c.globalAlpha = Math.max(0, a); c.textAlign = 'center';
+      const cy = this.vh * 0.3;
+      this.label(c, pp.text, this.vw / 2, cy, 30 * u * s, pp.color, FONT, 0.22);
+      if (pp.sub) this.label(c, pp.sub, this.vw / 2, cy + 26 * u, 12.5 * u, '#ffffff', FONT_UI, 0.22);
       c.globalAlpha = 1;
     }
   },

@@ -25,6 +25,7 @@ const BINDINGS = {
   roll:     ['Space', 'Espace', 'Roulade'],
   interact: ['KeyE', 'E', 'Entrer / sortir d\'un refuge'],
   wave:     ['KeyN', 'N', 'Lancer la vague suivante'],
+  ability:  ['KeyC', 'C', 'Capacité spéciale du personnage'],
 };
 
 /** Objets posables (achetés à l'Atelier des refuges) */
@@ -76,14 +77,14 @@ const Inventory = {
     const out = [];
     for (const id of MAIN_WEAPONS) {
       if (id !== 'rifle' && !g.weapons[id]) continue;
-      if (id === 'rifle' && g.mods && g.mods.shotgun) continue; // défi du jour : pas de fusil d'assaut
+      if (id === 'rifle' && g.mods && g.mods.shotgun) continue; // règle « Fusil à pompe imposé »
       const w = g.weapons[id];
       out.push({ id, kind: 'weapon', icon: id === 'rifle' ? '🔫' : WEAPONS[id].icon, name: id === 'rifle' ? "Fusil d'assaut" : WEAPONS[id].name, active: g.active === id, lvl: w ? w.lvl : 0, evo: w && w.evo });
     }
     const gr = g.weapons.grenade;
     if (gr) out.push({ id: 'grenade', kind: 'mine', icon: WEAPONS.grenade.icon, name: 'Grenade', cd: gr.t > 0 ? gr.t / (gr.cdMax || 1) : 0, lvl: gr.lvl, evo: gr.evo });
     const m = g.weapons.mines;
-    if (m) out.push({ id: 'mine', kind: 'mine', icon: WEAPONS.mines.icon, name: `Mines (${MINES_MAX} max sur le terrain)`, cd: g.mines.length >= MINES_MAX ? 1 : m.t > 0 ? m.t / (m.cdMax || 1) : 0, lvl: m.lvl, evo: m.evo, extra: `${g.mines.length}/${MINES_MAX}` });
+    if (m) out.push({ id: 'mine', kind: 'mine', icon: WEAPONS.mines.icon, name: `Mines (${Weapons.minesMax(g)} max sur le terrain, 30 s)`, cd: g.mines.length >= Weapons.minesMax(g) ? 1 : m.t > 0 ? m.t / (m.cdMax || 1) : 0, lvl: m.lvl, evo: m.evo, extra: `${g.mines.length}/${Weapons.minesMax(g)}` });
     for (const [id, it] of Object.entries(ITEMS)) if (g.inv[id] > 0) out.push({ id, kind: 'item', icon: it.icon, name: it.name, count: g.inv[id] });
     return out;
   },

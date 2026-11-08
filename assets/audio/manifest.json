@@ -1,0 +1,63 @@
+{
+    "credits":  "Sons : Kenney (kenney.nl), packs Impact Sounds, Sci-fi Sounds, Music Jingles - licence CC0",
+    "layer":  [
+                  "boom"
+              ],
+    "sfx":  {
+                "boom":  [
+                             "sfx/explosionCrunch_000.ogg",
+                             "sfx/explosionCrunch_001.ogg",
+                             "sfx/explosionCrunch_002.ogg",
+                             "sfx/explosionCrunch_003.ogg",
+                             "sfx/explosionCrunch_004.ogg"
+                         ],
+                "door":  [
+                             "sfx/impactMetal_heavy_000.ogg",
+                             "sfx/impactMetal_heavy_001.ogg"
+                         ],
+                "ability":  [
+                                "sfx/forceField_000.ogg",
+                                "sfx/forceField_001.ogg"
+                            ],
+                "buff":  [
+                             "sfx/forceField_002.ogg",
+                             "sfx/forceField_003.ogg"
+                         ],
+                "chest":  [
+                              "sfx/impactBell_heavy_000.ogg",
+                              "sfx/impactBell_heavy_001.ogg"
+                          ],
+                "unlock":  [
+                               "sfx/lowFrequency_explosion_000.ogg",
+                               "sfx/lowFrequency_explosion_001.ogg"
+                           ],
+                "achieve":  [
+                                "jingles/jingles_HIT02.ogg"
+                            ],
+                "levelup":  [
+                                "jingles/jingles_HIT11.ogg"
+                            ],
+                "clear":  [
+                              "jingles/jingles_HIT04.ogg"
+                          ],
+                "combo":  [
+                              "jingles/jingles_HIT07.ogg"
+                          ],
+                "objective":  [
+                                  "jingles/jingles_HIT13.ogg"
+                              ]
+            },
+    "volumes":  {
+                    "boom":  0.36,
+                    "door":  0.24,
+                    "ability":  0.28,
+                    "buff":  0.28,
+                    "chest":  0.24,
+                    "unlock":  0.36,
+                    "achieve":  0.24,
+                    "levelup":  0.28,
+                    "clear":  0.22,
+                    "combo":  0.22,
+                    "objective":  0.22
+                }
+}

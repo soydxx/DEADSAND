@@ -45,6 +45,54 @@ devant vous, où vous voulez. Grenades et drone restent automatiques.
 **Roulade** : courte, avec une jauge d'endurance de 3 charges (sous la survivante) qui se
 recharge en ~1 s par charge (`CONFIG.roll`).
 
+## Où améliorer quoi (une règle simple)
+| Où | Quand | Quoi | Monnaie |
+|---|---|---|---|
+| **Entraînement** (Préparation) | entre les parties | **la survivante** : vie, vitesse, aimant, ferraille, roulade, réanimations, Rex | réserve 🔩 |
+| **Établis** 🔧 + **Armurerie** (sur la carte) | en partie | **les armes** : pièces, nouvelles armes, niveaux, évolutions, peinture | ferraille de la partie |
+| **Refuges** (Pharmacie, Atelier, Hôpital) | en partie | **la survie** : soins, régénération, PV max, blindage, réflexes, vitesse, pièges, tourelles | ferraille de la partie |
+
+Il n'y a plus de choix d'amélioration en fin de vague : chaque vague repoussée rapporte une prime de
+ferraille (25 + 8 × n° de vague, CONFIG.waveScrap) à dépenser pendant la pause tactique.
+
+## Plaisir de jeu et envie de revenir
+- **Séries** (`js/fun.js`) : chaque élimination prolonge la série (2,6 s pour enchaîner) ; paliers annoncés
+  (SÉRIE 10, CARNAGE 25, MASSACRE 50, APOCALYPSE 100, LÉGENDAIRE 200) ; +10 % de ferraille par tranche de 10
+  (×2 max). Un coup reçu casse la série.
+- **Impacts** : morceaux qui volent, tête qui saute sur un coup critique fatal (HEADSHOT), ralenti sur la mort
+  d'un boss ou une explosion qui en tue 8+, léger tremblement à chaque tir.
+- **Coffres dorés** : les boss en lâchent deux, les élites parfois (`FUN.eliteChest`) → gerbe de ferraille.
+- **Bonus temporaires** (15 s, cristaux lumineux, `FUN.buffs`) : Frénésie (cadence ×2), Balles explosives, Adrénaline (vitesse).
+- **Défis de vague** (`CHALLENGES`) : une vague sur deux environ (vague 2+, hors boss), un petit défi avec prime.
+- **Établis** : en ressortant, onde dorée « ARME AMÉLIORÉE ! » et annonce de l'évolution débloquée.
+- **Niveau de survivante 1 → 50** (`js/progress.js`) : XP à chaque partie (même perdue), ferraille à chaque niveau,
+  objets du Garage débloqués par niveau (`level: N` dans cosmetics.js : peintures Nuit noire, Sang séché, Néon,
+  Diamant, traçantes violettes, mort « Plasma », peintures de voiture, titres).
+- **Missions** : 3 par jour + 1 par semaine (onglet 🎯 Missions), tirées de la date ; elles avancent à la fin de
+  chaque partie et la récompense est versée automatiquement.
+- **Bilan de fin de partie** : statistiques qui apparaissent une à une (meilleure série, dégâts, arme préférée,
+  coffres, défis), barre d'XP, niveaux gagnés, missions accomplies.
+- **Vega la mécano** : 4ᵉ personnage, débloqué en s'évadant : établis −25 %, tourelle offerte, +10 % de ferraille.
+- Outil de test (non publié) : `tools/autoplay.js`, un bot qui joue une partie accélérée et note les problèmes.
+
+## Contenu ajouté (zombies, capacités, cartes, manette, audio)
+- **Nouveaux zombies** (config.js) : Hurleur (vague 6+, hurle → zombies proches +50 % de vitesse 4 s), Porte-bouclier
+  (vague 8+, les balles de face font 12 % des dégâts : contournez-le ou faites-le sauter), Enfouisseur (vague 9+,
+  avance sous le sable, traînée visible, surgit près de vous). Les 3 derniers zombies d'une vague qui traîne s'enragent.
+- **Capacités** (`ABILITIES`, fun.js ; touche C / bouton à l'écran) : Mia grenade aveuglante, Kira sprint, Brick bouclier,
+  Vega tourelle express.
+- **Règles de partie** (onglet Équipe, `RUN_MODS` dans progress.js) : zombies enragés, élites, nuit éternelle, tempêtes,
+  refuges fermés, fragile, fusil à pompe imposé → bonus de ferraille et d'XP cumulés.
+- **Meilleures parties** : les 10 meilleures (onglet Succès).
+- **2ᵉ carte « Autoroute ensablée »** (`MAP_HIGHWAY` dans world.js), débloquée par une évasion ; choix dans l'onglet
+  Équipe (le jeu se recharge). Chaque carte définit ses établis, son générateur, ses lampadaires…
+- **Manette** (Xbox / PlayStation) : stick gauche, A roulade, B entrer, X grenade, Y capacité, LB mine, RB arme
+  suivante, Select vague, Start pause ; dans les menus A valider, B retour. Vibrations de la manette.
+- **Sons** des gros moments (série, coffre, bonus, capacité, niveau). **Vrais fichiers audio facultatifs** :
+  `assets/audio/manifest.json` → `{ "sfx": { "shoot": "sfx/shoot.ogg", … }, "volumes": {…}, "music": { "calm": "…", "action": "…" } }`.
+  Sans ce fichier, tout reste synthétisé.
+- **Soins** : plus de soin passif dans les refuges ; Rations limitées à 35 % de la vie par vague ; Seringue de rage
+  +1 PV / 3 zombies (4 PV/s max).
 ## Menus
 - **Écran titre** : le parking en 3D, votre personnage à côté de la voiture → « Commencer ».
 - **Préparation** : onglets Équipe (personnages, aperçu 3D, caractéristiques),
@@ -53,13 +101,9 @@ recharge en ~1 s par charge (`CONFIG.roll`).
   En fin de partie, un encart signale ce que la ferraille versée vient de rendre achetable.
 - **Téléphone** : le jeu se joue à l'horizontale (plein écran + verrouillage quand le navigateur
   le permet ; en vertical, un écran demande de tourner le téléphone et la partie se met en pause).
-- **Conseils** : bulles d'aide contextuelles, une seule fois chacune (`js/tips.js`) ; « Revoir les
-  conseils » dans Options.
 - **Boss** à tour de rôle toutes les 5 vagues : Mastodonte, Reine (fait naître des zombies),
   Bélier (charge en ligne droite, sonné contre un mur), Gerbeuse (bile et flaques acides).
   **Événements** (vagues 3+) : horde de coureurs, ravitaillement parachuté.
-- **Défi du jour** (`js/daily.js`) : 2 règles tirées de la date, les mêmes pour tous ; meilleurs
-  scores des 7 derniers jours.
 - **Son** : tirs, explosions et impacts en couches, grognements selon la distance de la horde,
   vent du désert (plus fort pendant les tempêtes).
 - **Qualité auto** : si les images ralentissent, la résolution, le halo puis les ombres sont réduits.
@@ -81,9 +125,10 @@ recharge en ~1 s par charge (`CONFIG.roll`).
 - **Carte en 4 zones** : Parking (départ) → Centre commercial (vague 5) → Quartier abandonné
   et station-service (vague 10) → Hôpital & base militaire (vague 15). Les barricades sautent,
   les zombies contournent les bâtiments (champ de flux sur grille), mini-carte en haut à droite.
-- **Pause tactique** de 20 s entre les vagues (lançable plus tôt).
-- **Refuges** : Pharmacie (soins), Armurerie (armes, munitions), Atelier (tourelles, barbelés,
-  portes renforcées, fûts piégés), Hôpital (PV max, régénération). À l'intérieur on ne tire plus
+- **Pause tactique** de 45 s entre les vagues (lançable plus tôt).
+- **Refuges** (SHELTER_ITEMS dans story.js) : Pharmacie (trousse, rations, seringue de rage), Atelier
+  (tourelles, barbelés, fûts piégés, portes renforcées, baskets, aimant), Hôpital (soins complets, PV max,
+  blindage, réflexes). À l'intérieur on ne tire plus
   et les zombies ne vous voient plus… mais ils assiègent la porte : si elle cède, vous êtes éjectée.
 - **Objectifs → pièces de la voiture** : bidon d'essence (vague 3), défendre le générateur (7),
   tenir la station-service (12), batterie de l'hôpital (16). Avec les 4 pièces : réparer la
@@ -94,6 +139,7 @@ recharge en ~1 s par charge (`CONFIG.roll`).
   Pièces à 3 niveaux, payées avec la ferraille de la partie (50 / 100 / 170) et visibles sur le modèle :
   fusil d'assaut (lunette → portée, canon → cadence, chargeur → dégâts, bouche → perforation, rail laser →
   critique), fusil à pompe (canons, pompe, cartouchière), lance-flammes (buse, réservoir, allumeur).
+  Onglet Armes : acheter les armes secondaires (150), les monter jusqu'au niveau 5, puis les faire évoluer.
   Onglet Peinture : essai en direct des peintures du Garage. Modèles des pièces : `applyGunMods` (render3d.js).
 - **Crachats des zombies** : boule verte lumineuse, traînée et anneau au sol qui montre la trajectoire.
 - **Nuit** une vague sur 4 (lampe torche, plus de zombies) et **tempêtes de sable** (visibilité réduite).
@@ -138,4 +184,6 @@ Modèles 3D par **Quaternius** (quaternius.com), licence **CC0**, via Poly Pizza
 « Adventurer » (Mia), « Animated Woman » (Kira), « SWAT » (Brick), « Zombie », « Husky » (Rex),
 « SUV », « Police Car », « Car », « Big Building », « Business Building », « Barracks »,
 « Containers », « Gas Can », « Gas Tank » ; bâtiments **Kenney** (City Kit, CC0).
+Sons : **Kenney** (kenney.nl), packs « Impact Sounds », « Sci-fi Sounds », « Music Jingles », licence **CC0**
+(ssets/audio/, liste dans ssets/audio/manifest.json). Les tirs restent synthétisés.
 Three.js (MIT).

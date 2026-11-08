@@ -57,9 +57,8 @@ const CONFIG = {
     deadZone: 0.12,
   },
 
-  rerollBaseCost: 10,           // coût (ferraille) pour relancer les améliorations
-  rerollCostStep: 5,
   waveClearBonus: 25,           // points × numéro de vague
+  waveScrap: { base: 25, perWave: 8 }, // prime de ferraille en fin de vague (à dépenser aux établis / refuges)
   screenShake: true,
   maxParticles: 700,
 };
@@ -107,6 +106,24 @@ const ENEMY_TYPES = {
     name: 'Blindé', behavior: 'chase', model: 'armored',
     hp: 90, speed: 58, radius: 15, damage: 16, armor: 6, knockbackResist: 0.6,
     color: '#5a6a4a', coins: 3, score: 35,
+  },
+  // Le Hurleur : reste en retrait et hurle : les zombies autour de lui accélèrent (vague 6+)
+  howler: {
+    name: 'Hurleur', behavior: 'howler', model: 'howler',
+    hp: 45, speed: 78, radius: 13, damage: 10, preferredDist: 180, howlEvery: 6, howlRadius: 240,
+    color: '#9a5ac8', coins: 3, score: 35,
+  },
+  // Le Porte-bouclier : un bouclier anti-émeute arrête les balles de face (contournez-le ou faites-le sauter)
+  shield: {
+    name: 'Porte-bouclier', behavior: 'chase', model: 'shield', shield: true,
+    hp: 75, speed: 55, radius: 15, damage: 15, knockbackResist: 0.75,
+    color: '#6a6a5a', coins: 3, score: 35,
+  },
+  // L'Enfouisseur : avance sous le sable (invisible, seule une traînée trahit sa présence) puis surgit
+  burrower: {
+    name: 'Enfouisseur', behavior: 'chase', model: 'burrower', burrow: true,
+    hp: 38, speed: 82, radius: 12, damage: 14, burrowSpeed: 150,
+    color: '#8a6a3a', coins: 2, score: 30,
   },
   boss: {
     name: 'Le Mastodonte', behavior: 'boss', model: 'behemoth', boss: true,
@@ -163,6 +180,9 @@ const WAVE_CONFIG = {
     tank: w >= 4 ? 1 + w * 0.35 : 0,
     bomber: w >= 5 ? 1 + w * 0.3 : 0,
     armored: w >= 7 ? 1 + w * 0.3 : 0,
+    howler: w >= 6 ? 0.8 + w * 0.12 : 0,
+    shield: w >= 8 ? 0.8 + w * 0.2 : 0,
+    burrower: w >= 9 ? 1 + w * 0.2 : 0,
   }),
   // zombies élites dorés (×3 PV, ×5 ferraille) à partir de la vague 6
   eliteChance: w => (w >= 6 ? Math.min(0.12, 0.03 + (w - 6) * 0.006) : 0),
@@ -171,48 +191,6 @@ const WAVE_CONFIG = {
   maxAlive: 90,
   minSpawnDistance: 230,
 };
-
-/* ---------------------------------------------------------------------
-   AMÉLIORATIONS (entre les vagues)
-   max : niveau max | weight : nombre ou (player) => poids | apply : (player, game)
-   requires : { idAmélioration: niveauMin } → n'apparaît qu'une fois les conditions remplies
-   Les armes et leurs évolutions sont ajoutées par weapons.js.
-   --------------------------------------------------------------------- */
-const UPGRADES = [
-  { id: 'damage', icon: '💥', name: 'Munitions lourdes', desc: '+25 % de dégâts (toutes les armes)', max: 10,
-    apply: p => { p.weapon.damage *= 1.25; } },
-  { id: 'firerate', icon: '🔧', name: 'Culasse huilée', desc: '+20 % de cadence de tir', max: 10,
-    apply: p => { p.weapon.fireRate *= 1.2; } },
-  { id: 'speed', icon: '👟', name: 'Baskets de course', desc: '+12 % de vitesse de déplacement', max: 6,
-    apply: p => { p.speed *= 1.12; } },
-  { id: 'maxhp', icon: '🦺', name: 'Gilet renforcé', desc: '+25 PV max (et soigne 25 PV)', max: 10,
-    apply: p => { p.maxHp += 25; p.hp = Math.min(p.maxHp, p.hp + 25); } },
-  { id: 'heal', icon: '🩹', name: 'Trousse de soins', desc: 'Restaure 50 % des PV max', max: Infinity,
-    weight: p => (p.hp < p.maxHp * 0.7 ? 2.5 : p.hp < p.maxHp ? 0.5 : 0),
-    apply: p => { p.hp = Math.min(p.maxHp, p.hp + p.maxHp * 0.5); } },
-  { id: 'multishot', icon: '🔫', name: 'Canon multiple', desc: '+1 balle par tir', max: 5, weight: 0.8,
-    apply: p => { p.weapon.projCount += 1; } },
-  { id: 'pierce', icon: '📌', name: 'Balles perforantes', desc: 'Les balles traversent +1 ennemi', max: 5,
-    apply: p => { p.weapon.pierce += 1; } },
-  { id: 'range', icon: '🔭', name: 'Lunette de visée', desc: '+20 % de portée', max: 5,
-    apply: p => { p.weapon.range *= 1.2; } },
-  { id: 'magnet', icon: '🧲', name: 'Aimant de récup', desc: '+60 % de rayon de collecte de la ferraille', max: 5,
-    apply: p => { p.magnet *= 1.6; } },
-  { id: 'projspeed', icon: '💨', name: 'Poudre améliorée', desc: '+25 % de vitesse des balles', max: 5,
-    apply: p => { p.weapon.projSpeed *= 1.25; } },
-  { id: 'regen', icon: '🥫', name: 'Rations', desc: '+1 PV par seconde', max: 5,
-    apply: p => { p.regen += 1; } },
-  { id: 'crit', icon: '🎯', name: 'Tir dans la tête', desc: '+10 % de chance de coup critique (×2)', max: 5,
-    apply: p => { p.weapon.critChance += 0.1; } },
-  { id: 'armor', icon: '🛡️', name: 'Plaques de blindage', desc: '−3 dégâts subis par coup', max: 5,
-    apply: p => { p.armor += 3; } },
-  { id: 'bigshot', icon: '🧨', name: 'Gros calibre', desc: 'Balles +35 % taille, +10 % dégâts, +recul', max: 4,
-    apply: p => { p.weapon.projRadius *= 1.35; p.weapon.damage *= 1.1; p.weapon.knockback *= 1.3; } },
-  { id: 'vampire', icon: '💉', name: 'Adrénaline', desc: 'Chaque élimination rend 1 PV', max: 3, weight: 0.7,
-    apply: p => { p.lifeOnKill += 1; } },
-  { id: 'reflex', icon: '🌀', name: 'Réflexes', desc: '−20 % de recharge de la roulade', max: 3, weight: 0.7,
-    apply: p => { p.rollCdMax *= 0.8; } },
-];
 
 /* ---------------------------------------------------------------------
    PERSONNAGES JOUABLES (débloqués avec la ferraille en réserve)
@@ -235,25 +213,27 @@ const CHARACTERS = {
     apply: p => { p.speed *= 1.15; p.weapon.critChance += 0.1; p.rollCdMax *= 0.8; p.maxHp -= 20; p.hp = p.maxHp; } },
   swat: { name: 'Brick', role: 'Tank', desc: '+50 PV, +3 armure, +15 % dégâts, −10 % vitesse.', model: 'swat', cost: 500,
     apply: p => { p.maxHp += 50; p.hp = p.maxHp; p.armor += 3; p.weapon.damage *= 1.15; p.speed *= 0.9; } },
+  // débloquée en réparant la voiture (succès « Évadée ! ») : capacité spéciale d'atelier
+  mechanic: { name: 'Vega', role: 'Mécano', desc: 'Établis −25 %, une tourelle offerte au départ, +10 % de ferraille.', model: 'survivor', cost: 0, unlock: 'escape', palette: 'mechanic',
+    apply: p => { p.benchDiscount = 0.25; p.scrapMult *= 1.1; } },
 };
+/** Personnage disponible ? (acheté, ou débloqué par un succès) */
+const charOwned = id => !!(Save.data.chars[id] || (CHARACTERS[id].unlock && Save.data.ach[CHARACTERS[id].unlock]));
 
 /* ---------------------------------------------------------------------
-   ATELIER : améliorations permanentes achetées avec la ferraille en réserve
+   ENTRAÎNEMENT : améliorations permanentes du PERSONNAGE (vie, vitesse, réanimations, Rex),
+   achetées avec la ferraille en réserve. Les armes s'améliorent aux établis, pendant la partie.
    apply : (player, niveau) au début de chaque partie
    --------------------------------------------------------------------- */
 const SHOP = [
   { id: 'hp', icon: '❤️', name: 'Constitution', desc: '+10 PV max par niveau', max: 5, cost: l => 60 + l * 60,
     apply: (p, l) => { p.maxHp += 10 * l; p.hp = p.maxHp; } },
-  { id: 'dmg', icon: '💥', name: 'Entraînement au tir', desc: '+8 % de dégâts par niveau', max: 5, cost: l => 80 + l * 80,
-    apply: (p, l) => { p.weapon.damage *= 1 + 0.08 * l; } },
   { id: 'speed', icon: '👟', name: 'Cardio', desc: '+4 % de vitesse par niveau', max: 5, cost: l => 60 + l * 60,
     apply: (p, l) => { p.speed *= 1 + 0.04 * l; } },
   { id: 'magnet', icon: '🧲', name: 'Poches profondes', desc: '+20 % de rayon de collecte par niveau', max: 3, cost: l => 50 + l * 50,
     apply: (p, l) => { p.magnet *= 1 + 0.2 * l; } },
   { id: 'scrap', icon: '🔩', name: 'Récupérateur', desc: '+10 % de ferraille ramassée par niveau', max: 5, cost: l => 100 + l * 100,
     apply: (p, l) => { p.scrapMult = 1 + 0.1 * l; } },
-  { id: 'reroll', icon: '🎲', name: 'Relance offerte', desc: '+1 relance gratuite par partie', max: 3, cost: l => 120 + l * 120,
-    apply: (p, l) => { p.freeRerolls = l; } },
   { id: 'roll', icon: '🌀', name: 'Réflexes', desc: '−10 % de recharge de la roulade par niveau', max: 3, cost: l => 90 + l * 90,
     apply: (p, l) => { p.rollCdMax *= 1 - 0.1 * l; } },
   { id: 'revive', icon: '💉', name: 'Adrénaline', desc: '+1 réanimation gratuite par partie', max: 2, cost: l => 250 + l * 250,

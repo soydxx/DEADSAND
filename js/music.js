@@ -27,11 +27,26 @@ const Music = {
   setVolume(v) { this.vol = v; if (this.bus) this.bus.gain.value = v * 0.55; },
   /** 0 = menu/pause, 0.6 = vague, 1 = boss */
   setIntensity(v) { this.target = v; },
+  /** Vraies pistes (assets/audio) : « calm » et « action » en boucle, mélangées selon l'intensité */
+  useTracks(tracks) {
+    const c = this.ctx; this.tracks = {};
+    for (const [k, buf] of Object.entries(tracks)) {
+      const src = c.createBufferSource(), g = c.createGain(); src.buffer = buf; src.loop = true; g.gain.value = 0;
+      src.connect(g); g.connect(this.bus); src.start(); this.tracks[k] = g;
+    }
+  },
 
   schedule() {
     const c = this.ctx;
     if (!c || c.state !== 'running') return;
     this.intensity += (this.target - this.intensity) * 0.05;
+    if (this.tracks) { // pistes enregistrées : fondu entre calme et action, pas de séquenceur
+      this.filter.frequency.setTargetAtTime(20000, c.currentTime, 0.3);
+      const I = this.intensity, T = this.tracks;
+      if (T.calm) T.calm.gain.setTargetAtTime(T.action ? Math.max(0, 1 - I * 1.4) : 1, c.currentTime, 0.5);
+      if (T.action) T.action.gain.setTargetAtTime(T.calm ? Math.min(1, I * 1.4) : 1, c.currentTime, 0.5);
+      return;
+    }
     this.filter.frequency.setTargetAtTime(500 + this.intensity * 7000, c.currentTime, 0.3);
     const spb = 60 / (this.bpm * (this.intensity > 0.9 ? 1.15 : 1)) / 4; // double-croches
     while (this.nextTime < c.currentTime + 0.12) { this.playStep(this.step, this.nextTime, spb); this.nextTime += spb; this.step = (this.step + 1) % 64; }

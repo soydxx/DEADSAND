@@ -69,28 +69,6 @@ class WaveManager {
     U.compact(this.warnings, w => w.t > 0);
   }
 
-  get remaining() { return this.queue.length + this.warnings.length + this.g.enemies.length; }
-  isCleared() { return !this.queue.length && !this.warnings.length && !this.g.enemies.length; }
-}
-
-/**
- * Tire n améliorations distinctes, pondérées, en excluant celles au niveau max
- * et celles dont les conditions (requires) ne sont pas remplies.
- */
-function rollUpgrades(g, n) {
-  const met = u => !u.requires || Object.entries(u.requires).every(([id, lv]) => (g.upLevels[id] || 0) >= lv);
-  const pool = UPGRADES
-    .filter(u => (g.upLevels[u.id] || 0) < (u.max == null ? Infinity : u.max) && met(u))
-    .map(u => [u, typeof u.weight === 'function' ? u.weight(g.player, g) : (u.weight == null ? 1 : u.weight)])
-    .filter(e => e[1] > 0);
-  // une évolution disponible est toujours proposée en premier
-  const evo = pool.find(e => e[0].kind === 'evo');
-  if (evo) { pool.splice(pool.indexOf(evo), 1); const rest = []; while (rest.length < n - 1 && pool.length) { const u = U.weightedPick(pool); rest.push(u); pool.splice(pool.findIndex(e => e[0] === u), 1); } return [evo[0], ...rest]; }
-  const out = [];
-  while (out.length < n && pool.length) {
-    const u = U.weightedPick(pool);
-    out.push(u);
-    pool.splice(pool.findIndex(e => e[0] === u), 1);
-  }
-  return out;
+  get remaining() { return this.queue.length + this.warnings.length + this.g.enemies.length + (this.g.burrowers || []).length; }
+  isCleared() { return !this.queue.length && !this.warnings.length && !this.g.enemies.length && !(this.g.burrowers || []).length; }
 }

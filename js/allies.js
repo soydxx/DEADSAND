@@ -30,7 +30,7 @@ const Allies = {
       if (!e || !World.los(t.x, t.y, e.x, e.y)) { t.cd = 0.15; continue; }
       t.cd = T.cd; t.aim = Math.atan2(e.y - t.y, e.x - t.x); t.fire = 0.06;
       const r = Weapons.roll(g, T.dmg);
-      g.pBullets.push({ x: t.x, y: t.y, vx: Math.cos(t.aim) * 620, vy: Math.sin(t.aim) * 620, r: 3.4, dmg: r.dmg, crit: r.crit, pierce: 0, life: T.range / 620, hits: [], kb: 0.5 });
+      g.pBullets.push({ x: t.x, y: t.y, vx: Math.cos(t.aim) * 620, vy: Math.sin(t.aim) * 620, r: 3.4, dmg: r.dmg, crit: r.crit, pierce: 0, life: T.range / 620, hits: [], kb: 0.5, src: 'turret' });
       Sfx.play('droneShot');
     }
     U.compact(g.turrets, t => t.t > 0);
@@ -40,7 +40,7 @@ const Allies = {
       for (const e of g.enemies) {
         if (e.dead || Math.hypot(e.x - tr.x, e.y - tr.y) > tr.r + e.r) continue;
         e.slowT = 0.2;
-        Entities.damageEnemy(g, e, P.dps * dt, false, 0, 0, { noText: true, ignoreArmor: true });
+        Entities.damageEnemy(g, e, P.dps * dt, false, 0, 0, { noText: true, ignoreArmor: true, src: 'trap' });
       }
     }
     U.compact(g.traps, t => t.t > 0);
@@ -64,7 +64,7 @@ const Allies = {
         sp = 0;
         if (d.cd <= 0) {
           d.cd = D.biteCd; d.biting = 0.3;
-          Entities.damageEnemy(g, e, D.bite * d.lvl * Weapons.dmgMult(g), false, (e.x - d.x) / dd * 80, (e.y - d.y) / dd * 80);
+          Entities.damageEnemy(g, e, D.bite * d.lvl * Weapons.dmgMult(g), false, (e.x - d.x) / dd * 80, (e.y - d.y) / dd * 80, { src: 'dog' });
           Sfx.play('bite');
         }
       }

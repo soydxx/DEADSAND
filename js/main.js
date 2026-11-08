@@ -12,35 +12,38 @@ const Game = {
   enemies: [], pBullets: [], eBullets: [], pickups: [], particles: [], texts: [],
   barrels: [], grenades: [], mines: [], fireZones: [], drones: [], fx: [], turrets: [], traps: [],
   weapons: {}, magnetT: 0, shelters: {}, objective: null, car: null, dog: null,
-  stats: null, upLevels: {}, coins: 0, rerollCost: 0,
+  stats: null, upLevels: {}, coins: 0,
   vacuum: false, waveCleared: false, clearTimer: 0, deathTimer: 0,
   choices: [], newAch: [], achTimer: 0, camZoom: 1, showPlayer: true,
   best: U.storage.get('arena.best', { score: 0, wave: 0 }),
 
-  /** opts.daily : défi du jour (règles spéciales tirées de la date) */
-  newRun(opts = {}) {
+  newRun() {
     const p = this.player = Entities.createPlayer();
     this.charId = Save.data.char;
     CHARACTERS[this.charId].apply(p);
     for (const s of SHOP) { const l = Save.data.perm[s.id] || 0; if (l) s.apply(p, l); }
-    this.daily = !!opts.daily;
-    this.mods = this.daily ? Daily.modsSet() : {};
-    if (this.mods.fragile) { p.maxHp = Math.round(p.maxHp * 0.5); p.hp = p.maxHp; p.scrapMult *= 2; }
+    // règles choisies dans la Préparation (plus dur → plus de ferraille et d'XP)
+    const chosen = runModsChosen();
+    this.mods = Object.fromEntries(chosen.map(m => [m.id, true]));
+    this.modBonus = runModsBonus(chosen);
+    p.scrapMult *= 1 + this.modBonus;
+    if (this.mods.fragile) { p.maxHp = Math.round(p.maxHp * 0.5); p.hp = p.maxHp; }
     this.enemies = []; this.pBullets = []; this.eBullets = [];
     this.pickups = []; this.particles = []; this.texts = [];
-    this.barrels = []; this.grenades = []; this.mines = []; this.fireZones = []; this.drones = []; this.fx = [];
+    this.barrels = []; this.grenades = []; this.mines = []; this.fireZones = []; this.drones = []; this.fx = []; this.burrowers = [];
     this.weapons = {}; this.magnetT = 0; this.hitStop = 0; this.flash = 0; this.lock = null;
     this.stats = { kills: 0, score: 0, time: 0, bosses: 0, elites: 0, barrels: 0, evolved: 0, rolls: 0 };
     this.upLevels = {};
     this.coins = 0;
     this.newAch = [];
-    this.zonesOpened = 0; this.nightsSurvived = 0; this.revives = 0; this.noRevive = false;
-    this.rerollCost = CONFIG.rerollBaseCost;
+    this.zonesOpened = 0; this.nightsSurvived = 0; this.revives = 0; this.noRevive = false; this.reviveFromBank = 0;
     this.wave = new WaveManager(this);
     Story.begin(this);            // carte réinitialisée + cinématique d'arrivée
     Allies.init(this);
     Inventory.init(this);
     Gunsmith.init(this);
+    Fun.init(this);
+    if (this.charId === 'mechanic') this.inv.turret = (this.inv.turret || 0) + 1; // Vega : une tourelle offerte
     if (this.mods.shotgun) { this.weapons.shotgun = { lvl: 1, t: 0, evo: false, aux: [] }; this.upLevels.w_shotgun = 1; this.active = 'shotgun'; }
     Input.reset(); Input.capture = null; UI.rebinding = null;
     UI.hide();
@@ -53,6 +56,8 @@ const Game = {
     this.vacuum = false;
     this.waveCleared = false;
     Story.onWaveStart(this, n);
+    Fun.startChallenge(this, n);
+    this.player.regenPool = this.player.maxHp * 0.35; this.lastStand = 0;
     Entities.placeBarrels(this);
     const boss = this.wave.isBoss;
     this.showBanner(boss ? `VAGUE ${n} · BOSS` : this.night ? `VAGUE ${n} · NUIT` : `VAGUE ${n}`,
@@ -63,6 +68,8 @@ const Game = {
   showBanner(text, sub, dur, color) { this.banner = { text, sub, t: 0, dur, color }; },
 
   update(dt) {
+    // ralenti (boss abattu, grosse explosion) : le temps de jeu passe à 30 %
+    if (this.slowmo > 0 && this.state === 'playing') { this.slowmo -= dt; dt *= 0.3; }
     this.time += dt;
     if (this.banner) { this.banner.t += dt; if (this.banner.t > this.banner.dur) this.banner = null; }
     if (this.shake > 0) this.shake = Math.max(0, this.shake - dt * 40);
@@ -70,7 +77,6 @@ const Game = {
     if (this.flash > 0) this.flash -= dt;
     Music.setIntensity(this.state === 'playing' ? (this.phase === 'break' ? 0.3 : this.wave.isBoss && !this.waveCleared ? 1 : 0.65) : this.state === 'dying' ? 0.1 : 0.2);
 
-    if (this.player && (this.state === 'playing' || Tips.cur)) Tips.update(this, dt); // conseils de premiers pas
     if (this.state === 'intro') { Story.updateIntro(this, dt); Entities.updateEffects(this, dt); return; }
     if (this.state === 'escape') { Story.updateEscape(this, dt); Entities.updateEnemies(this, dt * 0.3); Entities.updateEffects(this, dt); return; }
 
@@ -87,6 +93,7 @@ const Game = {
       Allies.update(this, dt);
       Story.updateShelter(this, dt);
       Entities.updateEnemies(this, dt);
+      Entities.updateBurrowers(this, dt);
       // grognements : plus fréquents et plus forts quand la horde est proche
       if ((this.groanT = (this.groanT || 1) - dt) <= 0 && this.enemies.length) {
         let d = 1e9; for (const e of this.enemies) d = Math.min(d, Math.hypot(e.x - p.x, e.y - p.y));
@@ -97,6 +104,7 @@ const Game = {
       Entities.updateBarrels(this, dt);
       Entities.updatePickups(this, dt);
       Entities.updateEffects(this, dt);
+      Fun.update(this, dt);
       this.achTimer -= dt;
       if (this.achTimer <= 0) { this.achTimer = 0.5; this.checkAchievements(); }
       if (this.state === 'playing' && this.phase === 'wave') this.checkWaveEnd(dt);
@@ -121,9 +129,13 @@ const Game = {
       this.vacuum = true;
       this.eBullets.length = 0;
       if (this.night) this.nightsSurvived++;
+      Fun.endWave(this);
       const bonus = this.wave.num * CONFIG.waveClearBonus;
       this.stats.score += bonus;
-      this.showBanner('VAGUE REPOUSSÉE !', `+${bonus} pts`, 1.4, '#ffc21a');
+      // prime de ferraille (remplace l'ancien choix d'amélioration) : à dépenser aux établis et dans les refuges
+      const scrap = Math.round((CONFIG.waveScrap.base + this.wave.num * CONFIG.waveScrap.perWave) * this.player.scrapMult);
+      this.coins += scrap;
+      this.showBanner('VAGUE REPOUSSÉE !', `+${bonus} pts · +${scrap} 🔩`, 1.6, '#ffc21a');
       Entities.petals(this, 60);
       Sfx.play('clear');
       return;
@@ -131,8 +143,9 @@ const Game = {
     this.clearTimer -= dt;
     const coinsLeft = this.pickups.some(c => c.kind === 'coin');
     if (this.clearTimer <= 0 && (!coinsLeft || this.clearTimer < -1.5)) {
-      if (this.player.inside) Story.leaveShelter(this);
-      this.openUpgrade();
+      this.player.invuln = Math.max(this.player.invuln, 1);
+      this.checkAchievements();
+      Story.startBreak(this); // pause tactique : établis et refuges ouverts
     }
   },
 
@@ -156,44 +169,10 @@ const Game = {
         Save.data.ach[a.id] = Date.now(); Save.save();
         this.newAch.push(a);
         UI.toast(`${a.icon} Succès : ${a.name}`, a.desc);
+        if (a.id === 'escape') setTimeout(() => UI.toast('🔧 Nouveau personnage : Vega', 'La mécano rejoint l\'équipe (onglet Équipe)'), 3400);
         Sfx.play('achieve');
       }
     }
-  },
-
-  /* ------------------------------ améliorations ------------------------------ */
-  openUpgrade() {
-    this.state = 'upgrade';
-    this.banner = null;
-    Input.releaseJoystick();
-    this.choices = rollUpgrades(this, 3);
-    this.showUpgradeUI();
-  },
-  showUpgradeUI() {
-    UI.showUpgrade(this.choices, this.upLevels, this.wave.num, this.coins, this.rerollCost, this.player.freeRerolls, this.weapons);
-  },
-
-  pickUpgrade(i) {
-    const u = this.choices[i];
-    if (!u || this.state !== 'upgrade') return;
-    u.apply(this.player, this);
-    this.upLevels[u.id] = (this.upLevels[u.id] || 0) + 1;
-    Sfx.play('upgrade');
-    UI.hide();
-    this.state = 'playing';
-    this.player.invuln = 1;
-    this.checkAchievements();
-    Story.startBreak(this);       // pause tactique avant la vague suivante
-  },
-
-  reroll() {
-    if (this.state !== 'upgrade') return;
-    const p = this.player;
-    if (p.freeRerolls > 0) p.freeRerolls--;
-    else if (this.coins >= this.rerollCost) { this.coins -= this.rerollCost; this.rerollCost += CONFIG.rerollCostStep; }
-    else return;
-    this.choices = rollUpgrades(this, 3);
-    this.showUpgradeUI();
   },
 
   /* ------------------------------ fin de partie ------------------------------ */
@@ -221,10 +200,15 @@ const Game = {
     this.bankShare = share; this.coinsLost = this.coins - banked;
     Save.data.bank += banked;
     Save.data.stats.kills += s.kills; Save.data.stats.bosses += s.bosses; Save.data.stats.runs++;
-    this.dailyBest = this.daily ? Daily.record(s.score, this.wave.num) : false;
     Save.data.charKills = Save.data.charKills || {};
     Save.data.charKills[this.charId] = (Save.data.charKills[this.charId] || 0) + s.kills; // défis de tenues
     this.checkAchievements();
+    this.progress = Progress.onRunEnd(this); // expérience, niveaux, missions
+    // tableau des 10 meilleures parties (local)
+    const fav = Object.entries(s.dmgBy || {}).sort((a, b) => b[1] - a[1])[0];
+    const d = new Date(), entry = { score: s.score, wave: this.wave.num, kills: s.kills, char: this.charId, fav: fav ? fav[0] : 'rifle', win: !!this.victory, mods: Object.keys(this.mods || {}).length, date: `${String(d.getDate()).padStart(2, '0')}/${String(d.getMonth() + 1).padStart(2, '0')}`, t: Date.now() };
+    const board = Save.data.board = (Save.data.board || []).concat(entry).sort((a, b) => b.score - a.score).slice(0, 10);
+    this.boardRank = board.indexOf(entry) + 1;
     Save.save();
     UI.showGameOver(this, this.best, isNewBest, banked, this.newAch);
   },
@@ -243,14 +227,26 @@ const Game = {
     else UI.hide();
   },
 
+  /** Paramètres : depuis le jeu (met en pause), l'écran titre ou la Préparation */
+  openSettings() {
+    if (this.state === 'playing') { this.state = 'paused'; Input.reset(); }
+    const from = this.state === 'paused' ? 'pause' : UI.screen === 'lobby' ? 'lobby' : 'title';
+    if (from === 'lobby') { UI.showLobby('options'); return; }
+    UI.showSettings(from);
+  },
+  closeSettings() {
+    Input.capture = null; UI.rebinding = null;
+    if (UI.optCtx === 'pause' && this.state === 'paused') UI.showPause(this);
+    else UI.showTitle(this.best);
+  },
+
   /** Remet le décor au calme (parking, jour) derrière les menus */
   resetScene() {
     this.player = null; this.banner = null;
     this.enemies = []; this.pBullets = []; this.eBullets = []; this.pickups = []; this.texts = [];
     this.barrels = []; this.grenades = []; this.mines = []; this.fireZones = []; this.drones = [];
     this.turrets = []; this.traps = []; this.objective = null; this.dog = null; this.crates = []; this.acid = [];
-    this.gunMods = null; this.gs = null;
-    if (Tips.cur) Tips.hide();
+    this.gunMods = null; this.gs = null; this.burrowers = [];
     this.night = false; this.storm = null; this.camZoom = 1; this.showPlayer = true; this.lock = null;
     if (this.wave) this.wave.warnings = [];
     World.reset();
@@ -304,6 +300,7 @@ const Game = {
       if (!r.canPay) return;
       const fromRun = Math.min(this.coins, r.cost);
       this.coins -= fromRun; Save.data.bank -= r.cost - fromRun; Save.save();
+      this.reviveFromBank = (this.reviveFromBank || 0) + r.cost - fromRun; // affiché en fin de partie
     }
     this.revives++;
     const p = this.player;
@@ -329,21 +326,20 @@ const Game = {
       case 'start': this.goLandscape(); this.toLobby(); break;
       case 'title': this.toMenu(); break;
       case 'play': this.newRun(); break;
-      case 'daily': this.goLandscape(); if (this.state !== 'menu') { this.state = 'menu'; this.resetScene(); } UI.showDaily(); break;
-      case 'playDaily': this.newRun({ daily: true }); break;
-      case 'pick': this.pickUpgrade(Number(data.i)); break;
-      case 'reroll': this.reroll(); break;
       case 'resume': this.resume(); break;
       case 'quit': this.noRevive = true; this.state = 'dying'; this.deathTimer = 0; UI.hide(); UI.setHudButtons(false); break;
       case 'quitAsk': if (this.state === 'paused') UI.showQuitConfirm(this); break;
       case 'rebind':
-        UI.rebinding = data.id; UI.showLobby('options');
+        UI.rebinding = data.id; UI.refreshOptions();
         Input.capture = e => {
           if (e.code !== 'Escape') Inventory.setBind(data.id, e.code, Inventory.keyLabel(e));
-          UI.rebinding = null; UI.showLobby('options');
+          UI.rebinding = null; UI.refreshOptions();
         };
         break;
-      case 'resetKeys': Inventory.resetBinds(); Input.capture = null; UI.rebinding = null; UI.showLobby('options'); break;
+      case 'resetKeys': Inventory.resetBinds(); Input.capture = null; UI.rebinding = null; UI.refreshOptions(); break;
+      // paramètres accessibles partout (écran titre, en partie via ⚙️ ou le menu pause)
+      case 'settings': this.openSettings(); break;
+      case 'settingsBack': this.closeSettings(); break;
       case 'revive': this.revive(); break;
       case 'giveup': if (this.state === 'revive') this.gameOver(); break;
       case 'menu': this.toLobby(); break;
@@ -351,22 +347,21 @@ const Game = {
       case 'shelterBuy': Story.buyShelter(this, data.id); break;
       case 'continue': Story.continueEndless(this); break;
       case 'tab': UI.showLobby(data.tab); break;
-      case 'resetTips': Tips.reset(); UI.toast('💡 Conseils réactivés', 'Ils réapparaîtront pendant la prochaine partie'); UI.showLobby('options'); break;
       case 'gcat': UI.garageCat = data.cat; UI.showLobby('garage'); break;
       case 'cosBuy': if (Cosmetics.buy(data.id)) { Sfx.play('buy'); this.checkAchievementsMenu(); } UI.showLobby('garage'); break;
       case 'cosEquip': Cosmetics.equip(data.id); UI.showLobby('garage'); break;
       case 'chars': case 'shop': case 'ach': case 'options': this.toLobby(action); break;
       case 'preview':
         UI.previewChar = data.id;
-        if (S.chars[data.id]) { S.char = data.id; Save.save(); }
+        if (charOwned(data.id)) { S.char = data.id; Save.save(); }
         UI.showLobby('chars');
         break;
       case 'selectChar':
-        if (S.chars[data.id]) { S.char = data.id; Save.save(); UI.showLobby('chars'); }
+        if (charOwned(data.id)) { S.char = data.id; Save.save(); UI.showLobby('chars'); }
         break;
       case 'buyChar': {
         const c = CHARACTERS[data.id];
-        if (c && !S.chars[data.id] && S.bank >= c.cost) { S.bank -= c.cost; S.chars[data.id] = true; S.char = data.id; Save.save(); Sfx.play('buy'); UI.showLobby('chars'); }
+        if (c && !c.unlock && !charOwned(data.id) && S.bank >= c.cost) { S.bank -= c.cost; S.chars[data.id] = true; S.char = data.id; Save.save(); Sfx.play('buy'); UI.showLobby('chars'); }
         break;
       }
       case 'buyPerm': {
@@ -376,15 +371,18 @@ const Game = {
       }
       case 'set': {
         const v = data.val === 'true' ? true : data.val === 'false' ? false : isNaN(Number(data.val)) ? data.val : Number(data.val);
-        S.settings[data.key] = v; Save.save(); Sfx.applyVolumes(); UI.showLobby('options');
+        S.settings[data.key] = v; Save.save(); Sfx.applyVolumes(); if (data.key === 'realSfx') Sfx.setReal(v); UI.refreshOptions();
         break;
       }
       case 'reload': location.reload(); break;
+      case 'map': if (MAPS[data.id] && MAP.id !== data.id && (data.id === 'desert' || S.ach.escape)) { S.settings.map = data.id; Save.save(); location.reload(); } break;
+      case 'mod': { const m = S.settings.runMods = S.settings.runMods || {}; m[data.id] = !m[data.id]; Save.save(); UI.showLobby('chars'); break; }
       // établi d'armurier
       case 'gsClose': Gunsmith.close(this); break;
       case 'gsGun': Gunsmith.setGun(this, data.id); break;
       case 'gsPart': Gunsmith.select(this, data.id); break;
       case 'gsBuy': Gunsmith.buy(this, data.id); break;
+      case 'gsWeapon': Gunsmith.buyWeapon(this, data.id); break;
       case 'gsTab': if (this.gs) { this.gs.tab = data.tab; this.gs.skin = null; UI.showGunsmith(this); } break;
       case 'gsSkin': Gunsmith.preview(this, data.id); break;
       case 'gsEquip': Cosmetics.equip(data.id); if (this.gs) this.gs.skin = null; UI.showGunsmith(this); break;
@@ -414,11 +412,10 @@ const Game = {
       case 'intro': Story.endIntro(this); break;
       case 'menu':
         if (UI.isLocked()) break;
+        if (UI.screen === 'settings') { if (code === 'Escape') this.closeSettings(); break; }
         if (UI.screen === 'title' && confirm) this.toLobby();
         else if (UI.screen === 'lobby' && (code === 'Enter' || code === 'NumpadEnter')) this.newRun();
         else if (UI.screen === 'lobby' && code === 'Escape') this.toMenu();
-        else if (UI.screen === 'daily' && code === 'Escape') this.toLobby();
-        else if (UI.screen === 'daily' && (code === 'Enter' || code === 'NumpadEnter')) this.newRun({ daily: true });
         break;
       case 'gameover':
         if (confirm && !UI.isLocked()) this.newRun();
@@ -436,12 +433,14 @@ const Game = {
         else if (act === 'roll' || ((code === 'ShiftLeft' || code === 'ShiftRight') && !act)) Entities.roll(this);
         else if (act === 'interact') this.contextAction('enter');
         else if (act === 'wave') this.contextAction('next');
+        else if (act === 'ability') Fun.useAbility(this);
         else if (act === 'next') Inventory.next(this);
         else if (act) Inventory.use(this, act);
         else if (code === 'Tab') this.lock = null;
         break;
       }
       case 'paused':
+        if (UI.screen === 'settings') { if (code === 'Escape') this.closeSettings(); break; }
         if (code === 'Escape' || code === 'KeyP' || confirm) this.resume();
         break;
       case 'gunsmith': { // établi : Échap / E pour reprendre, flèches pour choisir, Entrée pour acheter
@@ -453,14 +452,7 @@ const Game = {
         else if (code === 'ArrowLeft' || code === 'ArrowRight' || code === 'KeyQ' || code === 'KeyA' || code === 'KeyD') {
           const guns = Gunsmith.guns(this), i = guns.indexOf(gs.gun), d = code === 'ArrowLeft' || code === 'KeyQ' || code === 'KeyA' ? -1 : 1;
           if (guns.length > 1) Gunsmith.setGun(this, guns[(i + d + guns.length) % guns.length]);
-        } else if (code === 'Tab') { gs.tab = gs.tab === 'parts' ? 'paint' : 'parts'; UI.showGunsmith(this); }
-        break;
-      }
-      case 'upgrade': {
-        if (UI.isLocked()) break;
-        const m = /^(?:Digit|Numpad)([1-3])$/.exec(code);
-        if (m) this.pickUpgrade(Number(m[1]) - 1);
-        else if (code === 'KeyR') this.reroll();
+        } else if (code === 'Tab') { const T = ['parts', 'arms', 'paint']; gs.tab = T[(T.indexOf(gs.tab) + 1) % 3]; gs.skin = null; UI.showGunsmith(this); }
         break;
       }
     }
@@ -500,6 +492,12 @@ window.bootGame = function boot() {
   }, { passive: false });
   document.addEventListener('pointerdown', () => Sfx.unlock());
 
+  // anciens bonus d'Entraînement retirés (dégâts → établis, relances → plus de choix de fin de vague) : remboursés
+  const OLD_PERM = { dmg: l => 80 + l * 80, reroll: l => 120 + l * 120 };
+  let refund = 0;
+  for (const [id, cost] of Object.entries(OLD_PERM)) { const l = Save.data.perm[id] || 0; for (let i = 0; i < l; i++) refund += cost(i); delete Save.data.perm[id]; }
+  if (refund) { Save.data.bank += refund; Save.save(); setTimeout(() => UI.toast(`🔩 +${refund} remboursés`, 'Les dégâts s\'améliorent maintenant aux établis, pendant la partie'), 800); }
+
   const loading = document.getElementById('loading');
   if (loading) loading.remove();
   Game.toMenu();
@@ -512,6 +510,7 @@ window.bootGame = function boot() {
     if (dt < 0) dt = 0;
     const steps = Math.max(1, Math.ceil(dt / CONFIG.maxStep));
     const h = dt / steps;
+    Input.pollPad(Game.state);
     for (let i = 0; i < steps; i++) Game.update(h);
     Render.draw(Game);
     UI.tick(Game);

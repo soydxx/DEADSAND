@@ -1,6 +1,7 @@
 'use strict';
 /* =====================================================================
-   SONS synthétisés (Web Audio) — aucun fichier externe.
+   SONS : synthétisés (Web Audio), remplacés par de vrais fichiers quand ils existent
+   (assets/audio/manifest.json — sons Kenney.nl, licence CC0).
    Ajouter un son : une entrée dans SOUNDS { gap: anti-spam (s), fn(sfx) }.
    ===================================================================== */
 
@@ -44,6 +45,12 @@ const SOUNDS = {
   groan:    { gap: 0.4,  fn: s => s.groan(0.14, 0.75) },
   charge:   { gap: 0.5,  fn: s => { s.groan(0.16, 0.55); s.fnoise(0.9, 0.12, 'lowpass', 400, 1200, 1); } },
   lock:     { gap: 0.05, fn: s => { s.tone(1400, 0.05, 'square', 0.04); s.tone(1900, 0.06, 'square', 0.03, 0, 0.05); } },
+  // gros moments
+  ability:  { gap: 0.3,  fn: s => { s.fnoise(0.4, 0.18, 'bandpass', 400, 3000, 1.2); s.tone(220, 0.35, 'sawtooth', 0.08, 880); s.tone(1320, 0.3, 'triangle', 0.06, 0, 0.12); } },
+  combo:    { gap: 0.3,  fn: s => { [523, 659, 784, 1046].forEach((f, i) => s.tone(f, 0.16, 'square', 0.06, 0, i * 0.05)); s.fnoise(0.3, 0.1, 'highpass', 3000, 8000, 0.7, 0.15); } },
+  chest:    { gap: 0.3,  fn: s => { for (let i = 0; i < 8; i++) s.tone(1400 + Math.random() * 1200, 0.07, 'square', 0.03, 0, i * 0.045); s.tone(523, 0.4, 'triangle', 0.08, 1046); } },
+  levelup:  { gap: 1,    fn: s => { [392, 523, 659, 784, 1046].forEach((f, i) => s.tone(f, 0.3, 'square', 0.06, 0, i * 0.09)); s.tone(1046, 0.8, 'triangle', 0.07, 0, 0.45); } },
+  buff:     { gap: 0.3,  fn: s => { s.tone(330, 0.5, 'sawtooth', 0.07, 1320); s.fnoise(0.5, 0.12, 'bandpass', 600, 4000, 1.5); } },
 };
 
 const Sfx = {
@@ -65,6 +72,7 @@ const Sfx = {
       this.master.connect(this.out);
       this.applyVolumes();
       if (typeof Music !== 'undefined') Music.attach(this.ctx, this.out);
+      this.loadSamples();
     } catch (e) { this.ctx = null; }
   },
 
@@ -84,7 +92,41 @@ const Sfx = {
     const now = this.ctx.currentTime;
     if (this.last[name] && now - this.last[name] < snd.gap) return;
     this.last[name] = now;
-    snd.fn(this);
+    const vars = this.samples[name], buf = vars && vars[Math.floor(Math.random() * vars.length)];
+    if (buf) { // vrai fichier audio (assets/audio) : légère variation de hauteur pour éviter la répétition
+      const src = this.ctx.createBufferSource(), g = this.ctx.createGain();
+      src.buffer = buf; src.playbackRate.value = vars.length > 1 ? 0.94 + Math.random() * 0.12 : 1; // fanfares : hauteur exacte g.gain.value = this.sampleVol[name] || 0.8;
+      src.connect(g); g.connect(this.master); src.start();
+      if (this.layer[name]) snd.fn(this); // superposé au son synthétisé (ex. grondement des explosions)
+    } else snd.fn(this);
+  },
+
+  /* Fichiers audio facultatifs : assets/audio/manifest.json = { "sfx": { "shoot": "sfx/shoot.ogg", ... },
+     "volumes": { "shoot": 0.6 }, "music": { "calm": "music/calm.ogg", "action": "music/action.ogg" } }.
+     Sans manifeste, tout reste synthétisé. */
+  samples: {}, sampleVol: {}, layer: {},
+  /** Sons enregistrés : seulement si l'option « Sons réalistes » est activée (désactivée par défaut) */
+  setReal(on) { if (on) { this._loading = false; this.loadSamples(); } else { this.samples = {}; this.layer = {}; } },
+  async loadSamples() {
+    if (this._loading || !this.ctx || !(typeof Save !== 'undefined' && Save.data.settings.realSfx)) return; this._loading = true;
+    try {
+      const r = await fetch('assets/audio/manifest.json', { cache: 'no-cache' });
+      if (!r.ok) return;
+      const man = await r.json();
+      Object.assign(this.sampleVol, man.volumes || {});
+      for (const n of man.layer || []) this.layer[n] = true;
+      const dec = async url => { const a = await fetch('assets/audio/' + url); if (!a.ok) throw new Error(url); return this.ctx.decodeAudioData(await a.arrayBuffer()); };
+      // chaque son peut avoir plusieurs variantes (tableau) : l'une est tirée au hasard à chaque fois
+      await Promise.all(Object.entries(man.sfx || {}).map(async ([n, urls]) => {
+        const list = (await Promise.all([].concat(urls).map(u => dec(u).catch(() => null)))).filter(Boolean);
+        if (list.length) this.samples[n] = list; // sinon : son synthétisé
+      }));
+      if (man.music && typeof Music !== 'undefined') {
+        const tracks = {};
+        for (const [k, url] of Object.entries(man.music)) { try { tracks[k] = await dec(url); } catch (e) { /* ignoré */ } }
+        if (Object.keys(tracks).length) Music.useTracks(tracks);
+      }
+    } catch (e) { /* pas de manifeste : sons synthétisés */ }
   },
 
   tone(freq, dur, type = 'square', vol = 0.1, endFreq = 0, delay = 0) {

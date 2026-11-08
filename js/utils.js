@@ -29,7 +29,10 @@ const U = {
   /** Vibration courte sur mobile (si activée dans les options) */
   haptic(ms) {
     try {
-      if (typeof Save === 'undefined' || !Save.data.settings.vibrate || !navigator.vibrate) return;
+      if (typeof Save === 'undefined' || !Save.data.settings.vibrate) return;
+      // manette : vibration (si la manette le permet)
+      if (typeof Input !== 'undefined' && Input.mode === 'pad' && Input.padRumble) { Input.padRumble(ms); return; }
+      if (!navigator.vibrate) return;
       if (typeof Input !== 'undefined' && Input.mode !== 'touch') return;            // seulement sur écran tactile
       if (navigator.userActivation && !navigator.userActivation.hasBeenActive) return; // le navigateur exige un geste préalable
       navigator.vibrate(ms);

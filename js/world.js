@@ -13,7 +13,8 @@
    On démarre sur le parking ; les autres zones s'ouvrent aux vagues 5, 10, 15.
    ===================================================================== */
 
-const MAP = {
+const MAP_DESERT = {
+  id: 'desert', name: 'Supermarché du désert', icon: '🏜️',
   W: 2400, H: 1600, cell: 25, wallT: 26,
 
   zones: [
@@ -85,7 +86,7 @@ const MAP = {
     { kind: 'sign', x: 1290, y: 1545, text: 'ÉVACUATION', sub: '→ BASE MILITAIRE' },
     { kind: 'bodybags', x: 1020, y: 1020 },
     // centre commercial : étals renversés, caisses, graffiti
-    { kind: 'crates', x: 1080, y: 420 }, { kind: 'crates', x: 1460, y: 650 },
+    { kind: 'crates', x: 960, y: 430 }, { kind: 'crates', x: 1460, y: 650 },
     { kind: 'carts', x: 1300, y: 420 }, { kind: 'bags', x: 960, y: 690 },
     { kind: 'graffiti', x: 1200, y: 600, text: 'ILS SONT PARTOUT', rot: 0.08 },
     // quartier : campement de survivants, feu de camp, linge, matelas
@@ -109,14 +110,109 @@ const MAP = {
   car: { x: 1200, y: 1330, w: 46, d: 96 },
   gasStation: { x: 315, y: 1225 },   // zone à tenir (objectif) sous l'auvent
   startPos: { x: 1250, y: 1330 },
+  generator: { x: 1200, y: 470 },    // objectif « Défendre le générateur »
+  // établis (gunsmith.js) ; big = l'Armurerie
+  benches: [
+    { x: 875, y: 1250, zone: 'parking', rot: Math.PI / 2 },
+    { x: 1548, y: 1105, zone: 'parking', rot: -Math.PI / 2 },
+    { x: 1110, y: 368, zone: 'mall', rot: 0, big: true, name: 'Armurerie' },
+    { x: 610, y: 640, zone: 'slums', rot: 0 },
+    { x: 1900, y: 700, zone: 'base', rot: 0 },
+  ],
+  lamps: [[880, 1060], [1520, 1060], [880, 1540], [1520, 1540], [880, 380], [1520, 380], [1700, 700], [2300, 300]],
+  sandbags: [[1700, 1350], [1720, 1380], [2250, 1000], [2270, 1030], [1650, 300], [1670, 330]],
 };
 
-/** Refuges : bâtiments où l'on entre (on y est à l'abri, on n'y tire pas) */
+/* Deuxième carte (débloquée par une évasion) : une autoroute ensablée, un péage, un village
+   et une raffinerie. Mêmes zones, mêmes passages : seuls le décor et les obstacles changent. */
+const MAP_HIGHWAY = {
+  id: 'highway', name: 'Autoroute ensablée', icon: '🛣️',
+  W: 2400, H: 1600, cell: 25, wallT: 26,
+  zones: [
+    { id: 'parking', name: 'Aire d\'autoroute', x0: 800, y0: 800, x1: 1600, y1: 1600, unlock: 1, ground: 'ruins' },
+    { id: 'mall', name: 'Péage', x0: 800, y0: 0, x1: 1600, y1: 800, unlock: 5, ground: 'parking' },
+    { id: 'slums', name: 'Village fantôme', x0: 0, y0: 0, x1: 800, y1: 1600, unlock: 10, ground: 'plaza' },
+    { id: 'base', name: 'Raffinerie', x0: 1600, y0: 0, x1: 2400, y1: 1600, unlock: 15, ground: 'base' },
+  ],
+  separators: MAP_DESERT.separators,
+  buildings: [
+    { id: 'pharmacy', model: 'bld_c', x0: 1380, y0: 845, x1: 1560, y1: 950, h: 90, door: 'S', zone: 'parking' },
+    { id: 'mall', model: 'bld_big', x0: 1010, y0: 60, x1: 1390, y1: 270, h: 170, zone: 'mall' },
+    { id: 'market1', model: 'bld_business', x0: 850, y0: 540, x1: 990, y1: 640, h: 70, zone: 'mall' },
+    { id: 'market2', model: 'bld_business', x0: 1410, y0: 540, x1: 1550, y1: 640, h: 70, zone: 'mall', rot: Math.PI },
+    { id: 'workshop', model: 'bld_a', x0: 120, y0: 150, x1: 440, y1: 340, h: 140, door: 'S', zone: 'slums' },
+    { id: 'tower', model: 'bld_b', x0: 530, y0: 860, x1: 650, y1: 990, h: 170, zone: 'slums' },
+    { id: 'house1', model: 'barracks', x0: 80, y0: 620, x1: 220, y1: 750, h: 80, zone: 'slums' },
+    { id: 'hospital', model: 'bld_c', x0: 1830, y0: 120, x1: 2190, y1: 330, h: 120, door: 'S', zone: 'base', tint: '#f2f2f2' },
+    { id: 'barracks1', model: 'barracks', x0: 1760, y0: 1080, x1: 1900, y1: 1200, h: 80, zone: 'base' },
+    { id: 'barracks2', model: 'barracks', x0: 2020, y0: 1080, x1: 2160, y1: 1200, h: 80, zone: 'base' },
+  ],
+  props: [
+    // bouchon sur l'aire d'autoroute
+    { model: 'p_semi', x: 980, y: 1050, w: 46, d: 190, rot: Math.PI / 2 },
+    { model: 'car', x: 1350, y: 1150, w: 40, d: 82, rot: 0.3 },
+    { model: 'police', x: 1050, y: 1300, w: 44, d: 92, rot: 2.9 },
+    { model: 'p_bus', x: 1470, y: 1380, w: 50, d: 150, rot: 0.1 },
+    { model: 'suv_wreck', x: 920, y: 1450, w: 46, d: 92, rot: 1.9 },
+    // péage
+    { model: 'p_semi', x: 1480, y: 160, w: 46, d: 190, rot: 0 },
+    { model: 'container_green', x: 960, y: 700, w: 150, d: 66, rot: 0 },
+    { model: 'container_red', x: 1440, y: 700, w: 150, d: 66, rot: 0 },
+    { model: 'car', x: 900, y: 120, w: 40, d: 82, rot: 0.4 },
+    // village
+    { model: 'p_tanker', x: 600, y: 1450, w: 48, d: 180, rot: 0.3 },
+    { model: 'gastank', x: 180, y: 1000, w: 46, d: 46, rot: 0 },
+    { model: 'gastank', x: 260, y: 1000, w: 46, d: 46, rot: 0 },
+    { model: 'p_bus', x: 650, y: 600, w: 50, d: 150, rot: 0, burnt: true },
+    { model: 'car', x: 420, y: 560, w: 40, d: 82, rot: 1.7 },
+    // raffinerie : cuves, citerne, convoi militaire
+    { model: 'gastank', x: 1780, y: 620, w: 46, d: 46, rot: 0 }, { model: 'gastank', x: 1860, y: 620, w: 46, d: 46, rot: 0 },
+    { model: 'gastank', x: 1780, y: 700, w: 46, d: 46, rot: 0 }, { model: 'gastank', x: 1860, y: 700, w: 46, d: 46, rot: 0 },
+    { model: 'gastank', x: 2200, y: 650, w: 46, d: 46, rot: 0 }, { model: 'gastank', x: 2280, y: 650, w: 46, d: 46, rot: 0 },
+    { model: 'p_tanker', x: 2050, y: 820, w: 48, d: 180, rot: Math.PI / 2 },
+    { model: 'p_army', x: 1720, y: 1420, w: 48, d: 150, rot: 0 },
+    { model: 'p_tank', x: 2250, y: 1400, w: 60, d: 120, rot: 0.6 },
+    { model: 'p_heli', x: 2270, y: 420, w: 70, d: 150, rot: -0.3, medic: true },
+    { model: 'container_red', x: 2250, y: 1000, w: 150, d: 66, rot: Math.PI / 2 },
+  ],
+  decor: [
+    { kind: 'cones', x: 1300, y: 1000, rot: 0.2 }, { kind: 'cones', x: 1200, y: 760, rot: 0 }, { kind: 'tires', x: 1150, y: 1000 },
+    { kind: 'bags', x: 900, y: 1560 }, { kind: 'bodybags', x: 1300, y: 1250 },
+    { kind: 'sign', x: 1290, y: 1545, text: 'ÉVACUATION', sub: '→ RAFFINERIE' },
+    { kind: 'crates', x: 1300, y: 380 }, { kind: 'carts', x: 900, y: 420 },
+    { kind: 'graffiti', x: 1200, y: 610, text: 'PÉAGE FERMÉ', rot: 0.05 },
+    { kind: 'tent', x: 520, y: 230, color: '#5a5a3a', rot: 0.3 }, { kind: 'campfire', x: 600, y: 300 }, { kind: 'barrelfire', x: 480, y: 470 },
+    { kind: 'tires', x: 120, y: 1300 }, { kind: 'mattress', x: 700, y: 760, rot: 0.4 },
+    { kind: 'graffiti', x: 330, y: 830, text: 'ILS VIENNENT DE L\'AUTOROUTE', rot: 0.15 },
+    { kind: 'watchtower', x: 2330, y: 1080 }, { kind: 'watchtower', x: 1680, y: 80 },
+    { kind: 'crates', x: 1950, y: 960, military: true }, { kind: 'barrelfire', x: 2000, y: 1300 }, { kind: 'barrelfire', x: 1700, y: 900 },
+    { kind: 'graffiti', x: 2000, y: 980, text: 'DANGER · GAZ', rot: 0 },
+  ],
+  crows: [{ x: 980, y: 1050 }, { x: 600, y: 1450 }, { x: 2050, y: 820 }],
+  car: { x: 1200, y: 1470, w: 46, d: 96 },
+  gasStation: { x: 330, y: 1250 },
+  startPos: { x: 1250, y: 1470 },
+  generator: { x: 1200, y: 470 },
+  benches: [
+    { x: 950, y: 880, zone: 'parking', rot: 0 },
+    { x: 1548, y: 1000, zone: 'parking', rot: -Math.PI / 2 },
+    { x: 1110, y: 305, zone: 'mall', rot: 0, big: true, name: 'Armurerie' },
+    { x: 560, y: 420, zone: 'slums', rot: 0 },
+    { x: 2050, y: 560, zone: 'base', rot: 0 },
+  ],
+  lamps: [[880, 1150], [1520, 1100], [880, 420], [1520, 420], [1700, 900], [2300, 300], [600, 1100], [300, 700]],
+  sandbags: [[1700, 1300], [1720, 1330], [2250, 900], [1650, 300], [1680, 330], [2300, 1250]],
+};
+const MAPS = { desert: MAP_DESERT, highway: MAP_HIGHWAY };
+/* Carte choisie dans la Préparation (lue directement dans la sauvegarde : save.js n'est pas encore chargé) */
+const MAP = (() => { try { const s = JSON.parse(localStorage.getItem('deadsand.save')); return MAPS[s && s.settings && s.settings.map] || MAP_DESERT; } catch (e) { return MAP_DESERT; } })();
+
+/** Refuges : bâtiments où l'on entre (on y est à l'abri, on n'y tire pas) : achats pour SURVIVRE.
+    (L'Armurerie du centre commercial est un grand établi : voir BENCHES dans gunsmith.js) */
 const SHELTERS = {
-  pharmacy: { type: 'clinic', name: 'Pharmacie', icon: '💊', building: 'pharmacy', heal: 6 },
-  armory: { type: 'armory', name: 'Armurerie', icon: '🔫', building: 'mall' },
+  pharmacy: { type: 'clinic', name: 'Pharmacie', icon: '💊', building: 'pharmacy' }, // plus de soin passif à l'abri (on pouvait se soigner à l'infini)
   workshop: { type: 'workshop', name: 'Atelier', icon: '🔧', building: 'workshop' },
-  hospital: { type: 'hospital', name: 'Hôpital', icon: '🏥', building: 'hospital', heal: 15 },
+  hospital: { type: 'hospital', name: 'Hôpital', icon: '🏥', building: 'hospital' },
 };
 
 /* --------------------------------------------------------------------- */

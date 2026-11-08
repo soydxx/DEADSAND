@@ -6,20 +6,23 @@
    (lunette → portée, canon → cadence, chargeur → dégâts…).
    Les pièces se paient avec la ferraille de la partie (3 niveaux par pièce).
    Onglet « Peinture » : peintures d'armes du Garage, aperçu en direct.
-   Pièces visibles : voir gunParts() dans render3d.js.
+   Onglet « Armes » : acheter les armes secondaires, les monter de niveau, les faire évoluer.
+   Règle pour le joueur : l'Entraînement améliore la survivante, les établis ses armes,
+   les refuges sa survie.
+   Pièces visibles : voir applyGunMods() dans render3d.js.
    ===================================================================== */
 
-/** Établis sur la carte (zone = s'ouvre avec la zone) */
-const BENCHES = [
-  { x: 875, y: 1250, zone: 'parking', rot: Math.PI / 2 },
-  { x: 1548, y: 1105, zone: 'parking', rot: -Math.PI / 2 },
-  { x: 1470, y: 410, zone: 'mall', rot: 0 },
-  { x: 610, y: 640, zone: 'slums', rot: 0 },
-  { x: 1900, y: 700, zone: 'base', rot: 0 },
-];
-for (const b of BENCHES) MAP.props.push({ model: 'p_bench', x: b.x, y: b.y, w: 56, d: 26, rot: b.rot, bench: true });
+/** Établis sur la carte (zone = s'ouvre avec la zone). big : l'Armurerie du centre commercial */
+const BENCHES = MAP.benches; // emplacements propres à chaque carte (world.js)
+for (const b of BENCHES) MAP.props.push({ model: 'p_bench', x: b.x, y: b.y, w: b.big ? 84 : 56, d: b.big ? 30 : 26, rot: b.rot, bench: true });
 
 const GUN_COST = [50, 100, 170]; // prix des niveaux 1, 2, 3 d'une pièce (ferraille de la partie)
+/* Onglet « Armes » (ferraille de la partie) */
+const WEAPON_SHOP = {
+  buy: 150,                    // nouvelle arme secondaire (niveau 1)
+  level: l => 70 + l * 40,     // passer du niveau l au niveau l+1
+  evo: 280,                    // évolution, quand l'arme est au niveau max
+};
 
 /* Pièces par arme. lv : nom de la pièce montée à chaque niveau (0 = d'origine) */
 const GUN_PARTS = {
@@ -73,7 +76,9 @@ const Gunsmith = {
   /** Armes qu'on peut modifier : le fusil d'assaut + les armes équipables obtenues */
   guns(g) { return ['rifle', ...MAIN_WEAPONS.filter(id => id !== 'rifle' && g.weapons[id])]; },
   part(gun, id) { return GUN_PARTS[gun].parts.find(p => p.id === id); },
-  cost(lvl) { return GUN_COST[lvl]; },
+  /** Prix réduits pour Vega la mécano (p.benchDiscount) */
+  price(g, base) { return Math.round(base * (1 - ((g.player && g.player.benchDiscount) || 0))); },
+  partCost(g, lvl) { return this.price(g, GUN_COST[lvl]); },
 
   /** Établi proche (dans une zone ouverte) */
   near(x, y, maxD = 62) {
@@ -116,10 +121,10 @@ const Gunsmith = {
   open(g, bench) {
     if (g.state !== 'playing' || g.player.inside) return;
     const gun = this.guns(g).includes(g.active) ? g.active : 'rifle';
-    g.gs = { bench, gun, part: GUN_PARTS[gun].parts[0].id, tab: 'parts', skin: null, pulse: 0, yaw: 0 };
+    // l'Armurerie s'ouvre sur l'onglet « Armes »
+    g.gs = { bench, gun, part: GUN_PARTS[gun].parts[0].id, tab: BENCHES[bench] && BENCHES[bench].big ? 'arms' : 'parts', skin: null, pulse: 0, yaw: 0 };
     g.state = 'gunsmith';
     g.banner = null;
-    if (Tips.cur) Tips.hide();
     Input.reset(); Input.releaseJoystick();
     Sfx.play('reload');
     UI.setHudButtons(false);
@@ -127,8 +132,18 @@ const Gunsmith = {
   },
   close(g) {
     if (g.state !== 'gunsmith') return;
+    const bought = g.gs.bought || 0, evo = g.gs.evo;
     g.gs = null;
     g.state = 'playing';
+    // on ressort plus fort : onde dorée, étincelles, annonce de l'évolution
+    if (bought) {
+      const p = g.player;
+      g.fx.push({ t: 'ring', x: p.x, y: p.y, r: 130 });
+      Entities.burst(g, p.x, p.y, '#ffd24a', 30, 300, 3.5, 0.7); Entities.star(g, p.x, p.y, 2, '#fff3b0');
+      Entities.addText(g, p.x, p.y - 50, bought > 1 ? `ARMES AMÉLIORÉES ×${bought}` : 'ARME AMÉLIORÉE !', '#ffd24a', 20);
+      Sfx.play('upgrade');
+      if (evo) g.comboPop = { text: `${evo.icon} ${evo.name.toUpperCase()} !`, sub: 'Évolution débloquée', color: '#c77dff', t: 0 };
+    }
     g.player.invuln = Math.max(g.player.invuln, 0.6);
     Cosmetics.version++; // remet la peinture équipée (si une autre était en aperçu)
     UI.hide(); UI.screen = 'game'; UI.setHudButtons(true);
@@ -147,8 +162,9 @@ const Gunsmith = {
   buy(g, partId) {
     const gs = g.gs; if (!gs) return;
     const gun = gs.gun, l = this.lvl(g, gun, partId), part = this.part(gun, partId);
-    if (!part || l >= 3 || g.coins < GUN_COST[l]) { Sfx.play('clang'); return; }
-    g.coins -= GUN_COST[l];
+    const cost = this.partCost(g, l);
+    if (!part || l >= 3 || g.coins < cost) { Sfx.play('clang'); return; }
+    g.coins -= cost; gs.bought = (gs.bought || 0) + 1;
     g.gunMods[gun][partId] = l + 1;
     if (part.apply) part.apply(g.player, g);
     gs.part = partId; gs.pulse = 1;
@@ -158,4 +174,27 @@ const Gunsmith = {
   },
   /** Peintures : aperçu (même non débloquée), équiper, acheter avec la réserve */
   preview(g, id) { if (!g.gs) return; g.gs.skin = id; UI.showGunsmith(g); },
+
+  /* ---------------- onglet « Armes » : acheter, monter de niveau, faire évoluer ---------------- */
+  /** Prochaine action possible sur une arme secondaire : { kind: 'buy'|'level'|'evo'|'max'|'full', cost } */
+  weaponOffer(g, id) {
+    const w = g.weapons[id], def = WEAPONS[id];
+    if (!w) return Weapons.sideCount(g) >= MAX_SIDE_WEAPONS ? { kind: 'full' } : { kind: 'buy', cost: this.price(g, WEAPON_SHOP.buy) };
+    if (w.lvl < def.max) return { kind: 'level', cost: this.price(g, WEAPON_SHOP.level(w.lvl)) };
+    if (!w.evo && EVOLUTIONS.some(e => e.weapon === id)) return { kind: 'evo', cost: this.price(g, WEAPON_SHOP.evo) };
+    return { kind: 'max' };
+  },
+  buyWeapon(g, id) {
+    const o = this.weaponOffer(g, id);
+    if (!o.cost || g.coins < o.cost) { Sfx.play('clang'); return; }
+    g.coins -= o.cost;
+    if (o.kind === 'buy' || o.kind === 'level') Weapons.levelUp(g, id);
+    else { g.weapons[id].evo = true; g.stats.evolved++; if (g.gs) g.gs.evo = EVOLUTIONS.find(e => e.weapon === id); }
+    if (g.gs) g.gs.bought = (g.gs.bought || 0) + 1;
+    g.upLevels['w_' + id] = g.weapons[id].lvl;
+    if (g.gs) g.gs.pulse = 1;
+    Sfx.play('upgrade');
+    g.checkAchievements();
+    UI.showGunsmith(g);
+  },
 };

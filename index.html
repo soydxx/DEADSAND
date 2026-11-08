@@ -28,17 +28,16 @@
   <canvas id="hud"></canvas>
 
   <div id="hud-buttons" class="hidden">
-    <button id="btn-mute" class="icon-btn" aria-label="Activer / couper le son">🔊</button>
-    <button id="btn-pause" class="icon-btn" aria-label="Pause">⏸</button>
+    <button id="btn-settings" class="icon-btn" aria-label="Paramètres">⚙️</button>
   </div>
   <button id="btn-roll" class="hidden" aria-label="Roulade">🌀</button>
+  <button id="btn-ability" class="hidden" aria-label="Capacité spéciale"><span class="ic">💫</span><span class="k"></span></button>
   <div id="hotbar" class="hidden"></div>
   <div id="ctx-buttons">
     <button id="btn-action" class="ctx-btn hidden"></button>
     <button id="btn-next" class="ctx-btn next hidden"></button>
   </div>
   <div id="toast" aria-live="polite"></div>
-  <div id="tip" class="hidden" aria-live="polite"></div>
   <div id="rotate" aria-hidden="true"><div class="phone"></div><p>Tournez votre téléphone</p><small>Deadsand se joue à l'horizontale</small></div>
 
   <div id="loading"><div class="spinner"></div><p>Chargement…</p></div>
@@ -61,8 +60,8 @@
   <script src="js/allies.js"></script>
   <script src="js/inventory.js"></script>
   <script src="js/gunsmith.js"></script>
-  <script src="js/tips.js"></script>
-  <script src="js/daily.js"></script>
+  <script src="js/fun.js"></script>
+  <script src="js/progress.js"></script>
   <script src="js/ui.js"></script>
   <script src="js/main.js"></script>
   <!-- Rendu 3D : charge les modèles puis démarre le jeu -->

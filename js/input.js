@@ -74,6 +74,35 @@ const Input = {
 
   any(list) { for (const k of list) if (this.keys.has(k)) return true; return false; },
 
+  /* ---------------- manette (Xbox / PlayStation, API Gamepad) ----------------
+     Jeu : stick gauche = bouger, A/✕ roulade, B/○ entrer, X/□ grenade, Y/△ capacité,
+     LB/L1 mine, RB/R1 arme suivante, Select vague suivante, Start pause.
+     Menus : A/Start = valider, B = retour, croix directionnelle = flèches. */
+  padMove: { x: 0, y: 0 }, padPrev: [],
+  pollPad(state) {
+    const pads = navigator.getGamepads ? navigator.getGamepads() : [];
+    let gp = null; for (const p of pads) if (p && p.connected) { gp = p; break; }
+    this.gp = gp;
+    if (!gp) { this.padMove = { x: 0, y: 0 }; return; }
+    const ax = gp.axes[0] || 0, ay = gp.axes[1] || 0, m = Math.hypot(ax, ay);
+    this.padMove = m > 0.22 ? { x: ax / Math.max(1, m), y: ay / Math.max(1, m) } : { x: 0, y: 0 };
+    if (m > 0.4) this.mode = 'pad';
+    const B = typeof Inventory !== 'undefined' ? id => Inventory.bind(id).code : () => '';
+    const play = state === 'playing';
+    const map = play
+      ? { 0: B('roll'), 1: B('interact'), 2: B('grenade'), 3: B('ability'), 4: B('mine'), 5: B('next'), 8: B('wave'), 9: 'Escape', 12: 'Digit1', 13: 'Digit2' }
+      : { 0: 'Enter', 9: 'Enter', 1: 'Escape', 2: 'Tab', 12: 'ArrowUp', 13: 'ArrowDown', 14: 'ArrowLeft', 15: 'ArrowRight', 4: 'ArrowLeft', 5: 'ArrowRight' };
+    gp.buttons.forEach((b, i) => {
+      const down = b.pressed;
+      if (down && !this.padPrev[i] && map[i]) { this.mode = 'pad'; if (this.onKey) this.onKey(map[i]); }
+      this.padPrev[i] = down;
+    });
+  },
+  padRumble(ms) {
+    const a = this.gp && this.gp.vibrationActuator;
+    if (a && a.playEffect) a.playEffect('dual-rumble', { duration: Math.min(ms, 400), strongMagnitude: 0.7, weakMagnitude: 0.5 }).catch(() => {});
+  },
+
   /** Vecteur de déplacement, norme ≤ 1 */
   getMove() {
     let x = 0, y = 0;
@@ -82,6 +111,7 @@ const Input = {
     if (this.any(this.UP)) y -= 1;
     if (this.any(this.DOWN)) y += 1;
     if (x || y) { const d = Math.hypot(x, y); return { x: x / d, y: y / d }; }
+    if (this.padMove.x || this.padMove.y) return this.padMove;
 
     const j = this.joy;
     if (j.active) {

@@ -15,11 +15,13 @@ const OUTFIT_ROLES = {
   scout: { White: 'shirt', Grey: 'pants', Orange: 'top', Brown: 'boots' },
   swat: { Swat: 'top', Swat_Black: 'pants' },
 };
+OUTFIT_ROLES.mechanic = OUTFIT_ROLES.survivor; // Vega utilise le même modèle que Mia
 const OUTFIT_PALETTES = {
   desert:   { top: '#c2a06a', pants: '#8a7048', shirt: '#e0d0b0', gear: '#6a5232', trim: '#b08840', boots: '#4a3a26' },
   urban:    { top: '#50545c', pants: '#2e3036', shirt: '#8a8e96', gear: '#222428', trim: '#a8b0b8', boots: '#18191c' },
   military: { top: '#4a5a34', pants: '#3e4a2c', shirt: '#6a7450', gear: '#2e3420', trim: '#8a8a6a', boots: '#222418' },
-  grime:    { mult: '#8f7c5c' }, // la tenue d'origine, couverte de crasse et de sang séché
+  grime:    { mult: '#8f7c5c' },
+  mechanic: { top: '#d8701a', pants: '#2a3a4a', shirt: '#e8dcc4', gear: '#3a2a1a', trim: '#ffc21a', boots: '#1e1c1a' }, // combinaison orange de Vega // la tenue d'origine, couverte de crasse et de sang séché
 };
 
 const COSMETICS = [];
@@ -35,6 +37,9 @@ for (const ch of ['survivor', 'scout', 'swat']) {
   C({ id: `of_${ch}_military`, slot: `outfit_${ch}`, cat: 'outfit', char: ch, icon: '🎖️', name: `${nm} · Militaire`, palette: 'military', kills: { char: ch, n: 500 } });
 }
 
+C({ id: 'of_mechanic_default', slot: 'outfit_mechanic', cat: 'outfit', char: 'mechanic', icon: '🦺', name: 'Vega · Combinaison', palette: 'mechanic', free: true });
+C({ id: 'of_mechanic_grime', slot: 'outfit_mechanic', cat: 'outfit', char: 'mechanic', icon: '🩸', name: 'Vega · Cambouis', palette: 'grime', price: 120 });
+
 // --- Peintures d'armes ---
 const WEAPON_SKINS = {
   default: null,
@@ -44,6 +49,10 @@ const WEAPON_SKINS = {
   wood:    { metal: '#24201c', wood: '#3e2414', r: 0.55, m: 0.4 },
   hazard:  { metal: '#ffc21a', wood: '#1a1a1a', r: 0.5, m: 0.2, stripes: true },
   gold:    { metal: '#ffcc40', wood: '#e8a820', r: 0.25, m: 0.6, glow: '#5a3c00' },
+  night:   { metal: '#1a1c24', wood: '#2a2a38', r: 0.4, m: 0.6 },
+  blood:   { metal: '#5a1010', wood: '#2a0a08', r: 0.5, m: 0.4 },
+  neon:    { metal: '#16162a', wood: '#101018', r: 0.3, m: 0.5, glow: '#0a5a7a' },
+  diamond: { metal: '#cfefff', wood: '#8ad8ff', r: 0.1, m: 0.7, glow: '#1a4a6a' },
 };
 C({ id: 'ws_default', slot: 'weapon', cat: 'weapon', icon: '🔫', name: 'Acier d\'origine', skin: 'default', free: true });
 C({ id: 'ws_desert', slot: 'weapon', cat: 'weapon', icon: '🏜️', name: 'Camouflage désert', skin: 'desert', price: 200 });
@@ -52,6 +61,11 @@ C({ id: 'ws_wood', slot: 'weapon', cat: 'weapon', icon: '🪵', name: 'Bois somb
 C({ id: 'ws_hazard', slot: 'weapon', cat: 'weapon', icon: '⚠️', name: 'Danger jaune et noir', skin: 'hazard', price: 300 });
 C({ id: 'ws_chrome', slot: 'weapon', cat: 'weapon', icon: '🪞', name: 'Chrome', skin: 'chrome', price: 350 });
 C({ id: 'ws_gold', slot: 'weapon', cat: 'weapon', icon: '👑', name: 'Or massif', skin: 'gold', wave: 30 });
+// récompenses de niveau de survivante (level : niveau requis)
+C({ id: 'ws_night', slot: 'weapon', cat: 'weapon', icon: '🌑', name: 'Nuit noire', skin: 'night', level: 5 });
+C({ id: 'ws_blood', slot: 'weapon', cat: 'weapon', icon: '🩸', name: 'Sang séché', skin: 'blood', level: 15 });
+C({ id: 'ws_neon', slot: 'weapon', cat: 'weapon', icon: '💠', name: 'Néon', skin: 'neon', level: 25 });
+C({ id: 'ws_diamond', slot: 'weapon', cat: 'weapon', icon: '💎', name: 'Diamant', skin: 'diamond', level: 50 });
 
 // --- Voiture ---
 for (const [id, nm, hex, price] of [['white', 'Blanc cassé', null, 0], ['red', 'Rouge', '#b8281e', 120], ['black', 'Noir mat', '#202022', 150], ['olive', 'Kaki', '#5a6a3a', 150], ['sand', 'Sable', '#c8a46a', 120], ['blue', 'Bleu nuit', '#1e3a6a', 150], ['rust', 'Rouillée', '#8a4a26', 100]]) {
@@ -85,6 +99,8 @@ C({ id: 'da_spikes', slot: 'dog_acc', cat: 'dog', icon: '⛓️', name: 'Collier
 for (const [id, nm, hex, price] of [['yellow', 'Jaune', '#ffd27a', 0], ['red', 'Rouge', '#ff4a3a', 100], ['green', 'Vert', '#7dff6a', 100], ['blue', 'Bleu', '#5ab8ff', 100]]) {
   C({ id: `tr_${id}`, slot: 'tracer', cat: 'fx', icon: '✨', name: `Balles traçantes · ${nm}`, color: hex, ...(price ? { price } : { free: true }) });
 }
+C({ id: 'tr_purple', slot: 'tracer', cat: 'fx', icon: '✨', name: 'Balles traçantes · Violet', color: '#c77dff', level: 8 });
+C({ id: 'kf_plasma', slot: 'kill', cat: 'fx', icon: '🔵', name: 'Mort des zombies · Plasma', kfx: 'plasma', level: 30 });
 C({ id: 'kf_dust', slot: 'kill', cat: 'fx', icon: '💨', name: 'Mort des zombies · Poussière', kfx: 'dust', free: true });
 C({ id: 'kf_sparks', slot: 'kill', cat: 'fx', icon: '⚡', name: 'Mort des zombies · Étincelles', kfx: 'sparks', price: 150 });
 C({ id: 'kf_confetti', slot: 'kill', cat: 'fx', icon: '🎉', name: 'Mort des zombies · Confettis', kfx: 'confetti', price: 200 });
@@ -93,10 +109,16 @@ C({ id: 'rt_smoke', slot: 'trail', cat: 'fx', icon: '🌫️', name: 'Roulade ·
 C({ id: 'rt_sparks', slot: 'trail', cat: 'fx', icon: '🎇', name: 'Roulade · Étincelles', trail: 'sparks', price: 180 });
 
 // --- Titres (offerts par les succès) ---
-C({ id: 'ti_none', slot: 'title', cat: 'title', icon: '🏷️', name: 'Survivante', title: 'Survivante', free: true });
+C({ id: 'ti_none', slot: 'title', cat: 'title', icon: '🏷️', name: 'Recrue', title: 'Recrue', free: true }); // (pas « Survivante » : c'est déjà le pseudo par défaut)
 for (const [ach, t] of [['w5', 'Rescapée'], ['w10', 'Vétérane'], ['w15', 'Légende du désert'], ['boss1', 'Tueuse de géants'], ['boss3', 'Chasseuse de Mastodontes'], ['k1000', 'Fossoyeuse'], ['boom', 'Pyromane'], ['night', 'Noctambule'], ['rich', 'Ferrailleuse'], ['zone', 'Exploratrice'], ['escape', 'Évadée'], ['roll', 'Insaisissable']]) {
   C({ id: `ti_${ach}`, slot: 'title', cat: 'title', icon: '🏷️', name: t, title: t, ach });
 }
+
+for (const [lv, t] of [[3, 'Dure à cuire'], [10, 'Aguerrie'], [20, 'Fléau des morts'], [40, 'Reine du désert'], [50, 'Légende vivante']]) {
+  C({ id: `ti_lvl${lv}`, slot: 'title', cat: 'title', icon: '🏷️', name: t, title: t, level: lv });
+}
+C({ id: 'cp_blood', slot: 'car_paint', cat: 'car', icon: '🎨', name: 'Peinture · Rouge sang', color: '#5a0a0a', level: 12 });
+C({ id: 'cp_chrome', slot: 'car_paint', cat: 'car', icon: '🎨', name: 'Peinture · Chrome', color: '#c8ccd2', level: 35 });
 
 // --- Thème du menu ---
 C({ id: 'th_day', slot: 'theme', cat: 'theme', icon: '☀️', name: 'Plein jour', theme: 'day', free: true });
@@ -128,6 +150,7 @@ const Cosmetics = {
     if (it.ach) return !!S.ach[it.ach];
     if (it.kills) return (S.charKills[it.kills.char] || 0) >= it.kills.n;
     if (it.wave) return (typeof Game !== 'undefined' && Game.best && Game.best.wave >= it.wave);
+    if (it.level) return (S.level || 1) >= it.level;
     return false;
   },
   /** Texte de la condition de déblocage */
@@ -135,6 +158,7 @@ const Cosmetics = {
     if (it.ach) { const a = ACHIEVEMENTS.find(x => x.id === it.ach); return `🔒 Succès « ${a ? a.name : it.ach} »`; }
     if (it.kills) { const S = Save.data, have = S.charKills[it.kills.char] || 0; return `🔒 ${it.kills.n} zombies avec ${CHARACTERS[it.kills.char].name} (${Math.min(have, it.kills.n)}/${it.kills.n})`; }
     if (it.wave) return `🔒 Atteindre la vague ${it.wave} (record : ${Game.best.wave})`;
+    if (it.level) return `🔒 Niveau ${it.level} de survivante`;
     return '';
   },
   buy(id) {

@@ -22,37 +22,34 @@ const STORY = {
 /* Objectifs : chacun rapporte une pièce de la voiture. Ils restent actifs jusqu'à réussite. */
 const OBJECTIVES = [
   { wave: 3, type: 'fetch', item: 'gascan', zone: 'parking', name: "Trouver un bidon d'essence", short: 'Essence', reward: 80 },
-  { wave: 7, type: 'defend', zone: 'mall', name: 'Défendre le générateur', short: 'Bougies', at: { x: 1200, y: 470 }, hp: 420, reward: 120 },
+  { wave: 7, type: 'defend', zone: 'mall', name: 'Défendre le générateur', short: 'Bougies', at: MAP.generator, hp: 420, reward: 120 },
   { wave: 12, type: 'hold', zone: 'slums', name: 'Siphonner la station-service', short: 'Courroie', at: MAP.gasStation, r: 85, time: 22, reward: 160 },
   { wave: 16, type: 'fetch', item: 'battery', zone: 'base', name: "Récupérer une batterie à l'hôpital", short: 'Batterie', reward: 200 },
 ];
 
-/* Achats dans les refuges (ferraille de la partie) */
+/* Achats dans les refuges (ferraille de la partie) : tout ce qui aide la SURVIVANTE à tenir.
+   Les armes, elles, s'améliorent aux établis (js/gunsmith.js). max : nombre d'achats possibles par partie. */
 const SHELTER_ITEMS = {
   clinic: [
     { id: 'medkit', icon: '🩹', name: 'Trousse de soins', desc: '+40 PV immédiatement', cost: () => 40, buy: g => { g.player.hp = Math.min(g.player.maxHp, g.player.hp + 40); } },
+    { id: 'regen', icon: '🥫', name: 'Rations', desc: '+1 PV/s, jusqu\'à 35 % de la vie par vague', max: 5, cost: g => 110 + (g.buys.regen || 0) * 70, buy: g => { g.player.regen += 1; } },
+    { id: 'vampire', icon: '💉', name: 'Seringue de rage', desc: '+1 PV tous les 3 zombies abattus (4 PV/s max)', max: 3, cost: g => 160 + (g.buys.vampire || 0) * 100, buy: g => { g.player.lifeOnKill += 1 / 3; } },
   ],
   hospital: [
-    { id: 'maxhp', icon: '❤️', name: 'Transfusion', desc: '+20 PV max', cost: g => 120 + (g.buys.maxhp || 0) * 60, buy: g => { g.player.maxHp += 20; g.player.hp += 20; } },
-    { id: 'regen', icon: '💊', name: 'Stimulants', desc: '+1 PV par seconde', cost: g => 140 + (g.buys.regen || 0) * 80, buy: g => { g.player.regen += 1; } },
-  ],
-  armory: [
-    { id: 'newgun', icon: '🎁', name: 'Nouvelle arme', desc: 'Une arme secondaire au hasard', cost: () => 150,
-      ok: g => Weapons.sideCount(g) < MAX_SIDE_WEAPONS && Object.keys(WEAPONS).some(k => !g.weapons[k]),
-      buy: g => { const free = Object.keys(WEAPONS).filter(k => !g.weapons[k]); const id = free[Math.floor(Math.random() * free.length)]; Weapons.levelUp(g, id); g.upLevels['w_' + id] = 1; return WEAPONS[id].name; } },
-    { id: 'upgun', icon: '⬆️', name: 'Améliorer une arme', desc: 'La moins avancée gagne 1 niveau', cost: g => 90 + Math.min(...Object.values(g.weapons).map(w => w.lvl), 5) * 40,
-      ok: g => Object.entries(g.weapons).some(([k, w]) => w.lvl < WEAPONS[k].max),
-      buy: g => { const [id, w] = Object.entries(g.weapons).filter(([k, ww]) => ww.lvl < WEAPONS[k].max).sort((a, b) => a[1].lvl - b[1].lvl)[0]; w.lvl++; g.upLevels['w_' + id] = w.lvl; return WEAPONS[id].name; } },
-    { id: 'ammo', icon: '💥', name: 'Munitions blindées', desc: '+15 % de dégâts (toutes les armes)', cost: g => 120 + (g.buys.ammo || 0) * 70, buy: g => { g.player.weapon.damage *= 1.15; } },
+    { id: 'fullheal', icon: '🏥', name: 'Soins complets', desc: 'Toute la vie restaurée', cost: () => 90, ok: g => g.player.hp < g.player.maxHp, no: '✔ Vie déjà pleine', buy: g => { g.player.hp = g.player.maxHp; } },
+    { id: 'maxhp', icon: '❤️', name: 'Transfusion', desc: '+20 PV max', max: 8, cost: g => 120 + (g.buys.maxhp || 0) * 60, buy: g => { g.player.maxHp += 20; g.player.hp += 20; } },
+    { id: 'armor', icon: '🛡️', name: 'Plaques de blindage', desc: '−3 dégâts subis par coup', max: 5, cost: g => 130 + (g.buys.armor || 0) * 80, buy: g => { g.player.armor += 3; } },
+    { id: 'reflex', icon: '🌀', name: 'Réflexes', desc: 'La roulade se recharge 20 % plus vite', max: 3, cost: g => 110 + (g.buys.reflex || 0) * 70, buy: g => { g.player.rollCdMax *= 0.8; } },
   ],
   workshop: [
     { id: 'turret', icon: '🗼', name: 'Tourelle automatique', desc: "Va dans l'inventaire : posez-la où vous voulez, elle tire 45 s", cost: () => 110, buy: g => { Inventory.add(g, 'turret'); return 'inv'; } },
     { id: 'wire', icon: '🕸️', name: 'Barbelés', desc: "Va dans l'inventaire : ralentit et blesse les zombies qui les traversent", cost: () => 60, buy: g => { Inventory.add(g, 'wire'); return 'inv'; } },
-    { id: 'doors', icon: '🚪', name: 'Renforcer les portes', desc: '+150 PV pour toutes les portes', cost: g => 90 + (g.buys.doors || 0) * 50, buy: g => { g.doorBonus += STORY.door.reinforce; for (const s of Object.values(g.shelters)) { s.max = STORY.door.hp + g.doorBonus; s.hp = s.max; } } },
     { id: 'barrels', icon: '🛢️', name: 'Fûts piégés ×3', desc: "Va dans l'inventaire : trois fûts explosifs à poser où vous voulez", cost: () => 50, buy: g => { Inventory.add(g, 'barrels'); return 'inv'; } },
+    { id: 'doors', icon: '🚪', name: 'Renforcer les portes', desc: '+150 PV pour toutes les portes', cost: g => 90 + (g.buys.doors || 0) * 50, buy: g => { g.doorBonus += STORY.door.reinforce; for (const s of Object.values(g.shelters)) { s.max = STORY.door.hp + g.doorBonus; s.hp = s.max; } } },
+    { id: 'speed', icon: '👟', name: 'Baskets de course', desc: '+12 % de vitesse de déplacement', max: 5, cost: g => 90 + (g.buys.speed || 0) * 60, buy: g => { g.player.speed *= 1.12; } },
+    { id: 'magnet', icon: '🧲', name: 'Aimant de récup', desc: '+60 % de rayon de collecte de la ferraille', max: 4, cost: g => 60 + (g.buys.magnet || 0) * 40, buy: g => { g.player.magnet *= 1.6; } },
   ],
 };
-
 const Story = {
   /* ------------------------------ début de partie ------------------------------ */
   begin(g) {
@@ -135,7 +132,7 @@ const Story = {
     }
     const next = g.wave.num + 1, z = MAP.zones.find(zz => zz.unlock === next);
     if (z && !World.isUnlocked(z.id)) this.unlockZone(g, z);
-    else g.showBanner('PAUSE', `${STORY.breakTime} s · refuges ouverts · ${Input.mode === 'touch' ? '▶ pour lancer' : 'N pour lancer'}`, 2.4, '#7dff6a');
+    else g.showBanner('PAUSE', `Ferraille à dépenser : 🔧 établis (armes) · 🏥 refuges (survie) · ${Input.mode === 'touch' ? '▶ pour lancer' : 'N pour lancer'}`, 3, '#7dff6a');
     for (const s of Object.values(g.shelters)) { s.broken = false; s.hp = s.max; }
   },
   updateBreak(g, dt) {
@@ -273,7 +270,7 @@ const Story = {
   enterShelter(g, id) {
     const p = g.player, s = g.shelters[id];
     if (!s || s.broken || p.inside) return;
-    if (g.mods && g.mods.noshelter) { Entities.addText(g, p.x, p.y - 30, 'Porte condamnée (défi du jour)', '#ff6a5a', 13); return; }
+    if (g.mods && g.mods.noshelter) { Entities.addText(g, p.x, p.y - 30, 'Porte condamnée (règle « Refuges fermés »)', '#ff6a5a', 13); return; }
     p.inside = id; p.vx = p.vy = 0;
     g.lock = null;
     Input.releaseJoystick();
@@ -292,7 +289,7 @@ const Story = {
   buyShelter(g, itemId) {
     const p = g.player, type = SHELTERS[p.inside] && SHELTERS[p.inside].type;
     const it = (SHELTER_ITEMS[type] || []).find(i => i.id === itemId);
-    if (!it || (it.ok && !it.ok(g))) return;
+    if (!it || (it.ok && !it.ok(g)) || (it.max && (g.buys[it.id] || 0) >= it.max)) return;
     const cost = it.cost(g);
     if (g.coins < cost) return;
     g.coins -= cost;

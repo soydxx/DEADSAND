@@ -2,9 +2,9 @@
 /* =====================================================================
    ARMES SECONDAIRES (en plus du fusil d'assaut automatique)
    Chaque arme : niveaux 1→5 (stats(l)), description par niveau, et une
-   ÉVOLUTION débloquée quand l'arme est niv. 3 + une amélioration précise.
-   Les armes apparaissent dans les choix d'amélioration entre les vagues.
-   Leurs dégâts profitent des bonus de dégâts globaux (Munitions lourdes…).
+   ÉVOLUTION achetable quand l'arme est au niveau 5.
+   Tout s'achète aux établis (onglet « Armes », js/gunsmith.js).
+   Leurs dégâts profitent des bonus de dégâts du fusil (chargeur de l'établi…).
    ===================================================================== */
 
 /* type : 'main'    → arme qu'on équipe à la place du fusil d'assaut (touches / inventaire)
@@ -33,8 +33,9 @@ const WEAPONS = {
   },
   mines: {
     name: 'Mines', icon: '☢️', max: 5, type: 'manual',
-    stats: l => ({ cd: 3.5 * Math.pow(0.9, l - 1), radius: 60 + l * 6, dmg: 55 * (1 + 0.25 * (l - 1)), maxActive: 4 + l }),
-    desc: l => (l === 0 ? 'Nouvelle arme : posez une mine où vous voulez avec sa touche (recharge de quelques secondes)' : '+25 % dégâts, rayon plus grand, recharge plus courte'),
+    // rééquilibrées (jugées trop fortes) : recharge plus longue, dégâts et rayon réduits, 3 sur le terrain, durée de vie 30 s
+    stats: l => ({ cd: 6 * Math.pow(0.92, l - 1), radius: 50 + l * 5, dmg: 36 * (1 + 0.18 * (l - 1)) }),
+    desc: l => (l === 0 ? 'Nouvelle arme : posez une mine avec sa touche (3 sur le terrain, elles durent 30 s)' : '+18 % dégâts, rayon plus grand, recharge plus courte'),
   },
 };
 
@@ -43,31 +44,12 @@ const EVOLUTIONS = [
   { id: 'evo_drone', weapon: 'drone', icon: '🐝', name: 'Essaim de drones', desc: 'ÉVOLUTION : +2 drones qui tirent deux fois plus vite', requires: { w_drone: 3, firerate: 2 } },
   { id: 'evo_shotgun', weapon: 'shotgun', icon: '🌪️', name: 'Canon à mitraille', desc: 'ÉVOLUTION : deux fois plus de plombs, qui traversent les zombies', requires: { w_shotgun: 3, multishot: 1 } },
   { id: 'evo_flamer', weapon: 'flamer', icon: '🐉', name: 'Souffle du dragon', desc: 'ÉVOLUTION : portée ×1,6, cône élargi, dégâts ×1,5', requires: { w_flamer: 3, range: 1 } },
-  { id: 'evo_mines', weapon: 'mines', icon: '💠', name: 'Champ de mines', desc: 'ÉVOLUTION : les mines tombent par 3 et explosent plus fort', requires: { w_mines: 3, magnet: 1 } },
+  { id: 'evo_mines', weapon: 'mines', icon: '💠', name: 'Champ de mines', desc: 'ÉVOLUTION : les mines tombent par 2, explosent plus fort, 5 sur le terrain', requires: { w_mines: 3, magnet: 1 } },
 ];
 
 const MAX_SIDE_WEAPONS = 4;
-const MINES_MAX = 5; // mines posées en même temps sur le terrain
-
-// Inscription des armes et évolutions dans la liste des améliorations
-for (const [id, w] of Object.entries(WEAPONS)) {
-  UPGRADES.push({
-    id: 'w_' + id, icon: w.icon, name: w.name, max: w.max, kind: 'weapon',
-    desc: w.desc(0), descFn: lvl => w.desc(lvl),
-    weight: (p, g) => {
-      const owned = g && g.weapons[id];
-      if (!owned && g && Weapons.sideCount(g) >= MAX_SIDE_WEAPONS) return 0;
-      return owned ? 1.1 : 1.3;
-    },
-    apply: (p, g) => Weapons.levelUp(g, id),
-  });
-}
-for (const e of EVOLUTIONS) {
-  UPGRADES.push({
-    id: e.id, icon: e.icon, name: e.name, desc: e.desc, max: 1, kind: 'evo', weight: 4, requires: e.requires,
-    apply: (p, g) => { g.weapons[e.weapon].evo = true; g.stats.evolved++; },
-  });
-}
+const MINES_MAX = 3;      // mines posées en même temps sur le terrain (5 avec l'évolution)
+const MINE_LIFE = 30;     // secondes avant qu'une mine non déclenchée ne s'éteigne
 
 /* --------------------------------------------------------------------- */
 const Weapons = {
@@ -97,18 +79,20 @@ const Weapons = {
   placeMine(g) {
     const w = g.weapons.mines, p = g.player;
     if (!w || w.t > 0 || p.inside) return false;
-    if (g.mines.length >= MINES_MAX) { Entities.addText(g, p.x, p.y - 30, `${MINES_MAX} mines max sur le terrain`, '#ff6a5a', 13); return false; }
+    const max = this.minesMax(g);
+    if (g.mines.length >= max) { Entities.addText(g, p.x, p.y - 30, `${max} mines max sur le terrain`, '#ff6a5a', 13); return false; }
     const s = WEAPONS.mines.stats(w.lvl);
     w.t = s.cd; w.cdMax = s.cd;
-    const n = Math.min(w.evo ? 3 : 1, MINES_MAX - g.mines.length);
+    const n = Math.min(w.evo ? 2 : 1, max - g.mines.length);
     for (let i = 0; i < n; i++) {
       const a = p.aimAngle + Math.PI + (i - (n - 1) / 2) * 0.9, d = n > 1 ? 30 : 8;
-      g.mines.push({ x: p.x + Math.cos(a) * d, y: p.y + Math.sin(a) * d, arm: 0.6, r: s.radius * (w.evo ? 1.25 : 1), dmg: s.dmg * this.dmgMult(g) * (w.evo ? 1.3 : 1), age: 0 });
+      g.mines.push({ x: p.x + Math.cos(a) * d, y: p.y + Math.sin(a) * d, arm: 1.1, r: s.radius * (w.evo ? 1.2 : 1), dmg: s.dmg * this.dmgMult(g) * (w.evo ? 1.25 : 1), age: 0 });
     }
     Sfx.play('mine');
     return true;
   },
 
+  minesMax(g) { return g.weapons.mines && g.weapons.mines.evo ? 5 : MINES_MAX; },
   /** Armes de départ (grenades, mines) offertes au début de chaque partie, niveau 1 */
   giveStarters(g) {
     for (const [id, def] of Object.entries(WEAPONS)) if (def.starter && !g.weapons[id]) {
@@ -125,7 +109,7 @@ const Weapons = {
     if (!w || w.t > 0 || p.inside) return false;
     const s = WEAPONS.grenade.stats(w.lvl), R = s.range;
     let tx, ty;
-    const L = g.lock, cur = Input.mode !== 'touch' && typeof Render !== 'undefined' && Render.cursorWorld ? Render.cursorWorld() : null;
+    const L = g.lock, cur = Input.mode === 'keyboard' && typeof Render !== 'undefined' && Render.cursorWorld ? Render.cursorWorld() : null;
     if (L && !L.dead && U.dist2(p.x, p.y, L.x, L.y) < R * R * 1.4) { tx = L.x; ty = L.y; }
     else if (cur) { tx = cur.x; ty = cur.y; }
     else { const t = this.nearest(g, p.x, p.y, R); if (t) { tx = t.x; ty = t.y; } else { tx = p.x + Math.cos(p.aimAngle) * 200; ty = p.y + Math.sin(p.aimAngle) * 200; } }
@@ -162,7 +146,8 @@ const Weapons = {
       const type = WEAPONS[id].type;
       if (type === 'main' && g.active !== id) { w.t = Math.min(w.t, 0.25); continue; } // rangée dans l'inventaire
       const s = WEAPONS[id].stats(w.lvl);
-      this[id](g, p, w, type === 'main' ? Gunsmith.tune(g, id, s) : s, dt); // pièces de l'établi
+      if (type === 'main') { Gunsmith.tune(g, id, s); if (s.cd && Fun.on(g, 'frenzy')) s.cd /= 2; } // pièces de l'établi + Frénésie
+      this[id](g, p, w, s, dt);
     }
     this.updateGrenades(g, dt);
     this.updateMines(g, dt);
@@ -216,7 +201,7 @@ const Weapons = {
       let da = Math.abs(Math.atan2(dy, dx) - a); if (da > Math.PI) da = TAU - da;
       if (da > cone + e.r / Math.max(d, 1)) continue;
       const r = this.roll(g, dmg);
-      Entities.damageEnemy(g, e, r.dmg, r.crit, Math.cos(a) * 30, Math.sin(a) * 30, { noText: w.tick % 4 !== 0, ignoreArmor: true });
+      Entities.damageEnemy(g, e, r.dmg, r.crit, Math.cos(a) * 30, Math.sin(a) * 30, { noText: w.tick % 4 !== 0, ignoreArmor: true, src: 'flamer' });
     }
     // flammes visuelles
     for (let i = 0; i < 4 && g.particles.length < CONFIG.maxParticles; i++) {
@@ -250,7 +235,7 @@ const Weapons = {
       z.t -= dt; z.tick -= dt;
       if (z.tick <= 0) {
         z.tick = 0.25;
-        for (const e of g.enemies) if (!e.dead && Math.hypot(e.x - z.x, e.y - z.y) < z.r + e.r) Entities.damageEnemy(g, e, z.dps * 0.25, false, 0, 0, { noText: true, ignoreArmor: true });
+        for (const e of g.enemies) if (!e.dead && Math.hypot(e.x - z.x, e.y - z.y) < z.r + e.r) Entities.damageEnemy(g, e, z.dps * 0.25, false, 0, 0, { noText: true, ignoreArmor: true, src: 'boom' });
       }
       if (Math.random() < 0.6 && g.particles.length < CONFIG.maxParticles) {
         const a = Math.random() * TAU, d = Math.sqrt(Math.random()) * z.r;
@@ -288,6 +273,7 @@ const Weapons = {
   updateMines(g, dt) {
     for (const m of g.mines) {
       m.age += dt; m.arm -= dt;
+      if (m.age > MINE_LIFE) { m.dead = true; Entities.puff(g, m.x, m.y, 3, 10, true); continue; } // s'éteint
       if (m.arm > 0) continue;
       for (const e of g.enemies) {
         if (!e.dead && Math.hypot(e.x - m.x, e.y - m.y) < 24 + e.r) { m.dead = true; Entities.explode(g, m.x, m.y, m.r, m.dmg, { color: '#ffb03a' }); break; }
