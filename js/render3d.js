@@ -244,6 +244,8 @@ async function loadAssets() {
     Promise.all(names.map(n => load(`assets/models/${n}.glb`))),
     Promise.all(world.map(n => load(`assets/models/world/${n}.glb`).catch(() => null))),
   ]);
+  // performances : le zombie n'a pas besoin de ses paupières (un 2e maillage animé + un 2e squelette par zombie)
+  const zi = names.indexOf('zombie'), lids = []; files[zi].scene.traverse(o => { if (o.isSkinnedMesh && /eyelid/i.test(o.name)) lids.push(o); }); for (const o of lids) o.parent.remove(o);
   names.forEach((n, i) => { ASSETS[n] = prepAsset(files[i]); });
   world.forEach((n, i) => { if (wfiles[i]) WORLD_ASSETS[n] = prepStatic(wfiles[i], n === 'dog'); });
   if (WORLD_ASSETS.dog) ASSETS.dog = prepAsset(wfiles[world.indexOf('dog')]);
@@ -623,7 +625,7 @@ function makeZombie(kind, elite) {
   if (t.glow) { for (const m of a.mats) { m.emissive.set(t.glow); m.emissiveIntensity = 0.2; } }
   // performances : seuls les boss projettent une vraie ombre (les autres gardent leur ombre douce au sol)
   const bigShadow = !!t.glow || kind === 'behemoth';
-  a.root.traverse(o => { if (o.isMesh) o.castShadow = bigShadow; });
+  a.root.traverse(o => { if (o.isMesh) { o.userData.cast = bigShadow; o.castShadow = bigShadow && !Render.staticShadows; } });
   return a;
 }
 
@@ -908,11 +910,18 @@ const Render = {
     this.h = this.hud.getContext('2d');
     this.probe = document.getElementById('safe-probe');
 
-    const r = this.renderer = new THREE.WebGLRenderer({ canvas, antialias: !LOW, powerPreference: 'high-performance' });
-    // résolution : Haute = jusqu'à ×2 (écrans très fins), Auto = ×1,5 max (gros gain sur les écrans haute densité), Éco = ×1
-    r.setPixelRatio(Math.min(window.devicePixelRatio || 1, LOW ? 1 : Save.quality() === 'high' ? 2 : 1.5));
-    // machine modeste (peu de mémoire / de cœurs) en mode Auto : on part directement d'une résolution ×1
-    if (Save.quality() === 'auto' && ((navigator.deviceMemory && navigator.deviceMemory <= 4) || (navigator.hardwareConcurrency && navigator.hardwareConcurrency <= 4))) r.setPixelRatio(1);
+    // carte graphique : si le navigateur dessine « en logiciel » (accélération matérielle coupée), le jeu sera lent quoi qu'on fasse
+    try {
+      const pg = document.createElement('canvas').getContext('webgl'), dbg = pg && pg.getExtension('WEBGL_debug_renderer_info');
+      this.gpuName = dbg ? String(pg.getParameter(dbg.UNMASKED_RENDERER_WEBGL)) : '';
+    } catch (e) { this.gpuName = ''; }
+    this.softGL = /swiftshader|llvmpipe|software|basic render/i.test(this.gpuName);
+    const setting = Save.data.settings.quality, auto = setting === 'auto';
+    const weak = (navigator.deviceMemory && navigator.deviceMemory <= 4) || (navigator.hardwareConcurrency && navigator.hardwareConcurrency <= 4);
+    const r = this.renderer = new THREE.WebGLRenderer({ canvas, antialias: !LOW && !this.softGL, powerPreference: 'high-performance' });
+    // résolution : Haute = jusqu'à ×2, Auto = ×1,5 max (×1 sur machine modeste), Éco = ×1
+    this.basePR = Math.min(window.devicePixelRatio || 1, LOW ? 1 : setting === 'high' ? 2 : weak || this.softGL ? 1 : 1.5);
+    r.setPixelRatio(this.basePR);
     r.shadowMap.enabled = !LOW; r.shadowMap.type = THREE.PCFSoftShadowMap;
     r.toneMapping = THREE.ACESFilmicToneMapping; r.toneMappingExposure = 1.05;
     r.outputColorSpace = THREE.SRGBColorSpace;
@@ -941,6 +950,35 @@ const Render = {
     this.dying = [];
     this.lastT = 0;
     this.resize();
+    // qualité Auto : on repart du niveau d'allègement trouvé la dernière fois (ou d'un niveau prudent sur machine modeste)
+    if (auto) { const n = Math.max(Save.data.settings.aq || 0, this.softGL ? 5 : weak ? 1 : 0); if (n) this.applyAq(n); }
+  },
+
+  /** Ombres « fixes » : la carte d'ombres n'est recalculée que lorsque la caméra a avancé (et 2 fois par seconde),
+      au lieu de chaque image ; les objets mobiles ne projettent alors plus d'ombre (ils gardent leur ombre douce au sol) */
+  setStaticShadows(on) {
+    this.staticShadows = on; this.sun.shadow.autoUpdate = !on; this.sun.shadow.needsUpdate = true;
+    const set = o => o && o.traverse(m => { if (m.isMesh && m.userData.cast == null) m.userData.cast = m.castShadow; if (m.isMesh) m.castShadow = on ? false : m.userData.cast; });
+    if (this.player) set(this.player.root);
+    if (this.dog) set(this.dog.root);
+    for (const a of this.enemyModels || []) set(a.root);
+    for (const k in this.pools || {}) if (!this.FIXED_KINDS[k]) for (const o of this.pools[k]) set(o);
+  },
+  FIXED_KINDS: { barrel: 1, turret: 1, gen: 1, trap: 1, mine: 1 }, // immobiles : gardent leur ombre
+
+  /** Qualité Auto, niveaux d'allègement cumulés (0 = tout activé) :
+      1 ombres fixes + animation des zombies une image sur deux · 2 résolution −25 % · 3 sans halo lumineux
+      4 sans ombres · 5 résolution 70 % + moins de particules · 6 résolution 50 % */
+  applyAq(n) {
+    const r = this.renderer;
+    this.aqLevel = n;
+    this.halfAnim = n >= 1;
+    this.sun.castShadow = n < 4;
+    this.setStaticShadows(n >= 1 && n < 4);
+    r.setPixelRatio(n >= 6 ? 0.5 : n >= 5 ? 0.7 : n >= 2 ? Math.max(1, this.basePR * 0.75) : this.basePR);
+    if (n >= 3) this.composer = null;
+    this.lite = n >= 5;
+    this.resize();
   },
 
   buildLights() {
@@ -963,7 +1001,7 @@ const Render = {
   },
 
   buildWorld() {
-    const s = this.scene, R = rng(42), rnd = (a, b) => a + R() * (b - a);
+    const s = this.scene, R = rng(42), rnd = (a, b) => a + R() * (b - a), firstChild = s.children.length;
     // terrain : plat sur la carte, dunes autour
     const gGeo = new THREE.PlaneGeometry(W + 3600, H + 3600, 170, 140); gGeo.rotateX(-Math.PI / 2);
     const p = gGeo.attributes.position;
@@ -1119,6 +1157,7 @@ const Render = {
       const o = PROPS[name] ? bake(PROPS[name](pr.w, pr.d, pr)) : placeModel(name, pr.w, pr.d, null, pr.model === 'suv_wreck' ? '#8a6a5a' : null);
       if (!o) continue;
       o.position.set(toX(pr.x), 0, toZ(pr.y)); o.rotation.y = pr.rot;
+      o.traverse(x => { if (x.isMesh) x.material.userData.merge = true; }); // épave fixe : fusionnable (mergeStatic)
       s.add(o);
       if (pr.burning) this.fires.push({ x: pr.x, y: pr.y, h: 26, size: 1.4, flame: true });
       if (pr.burnt || pr.medic) this.fires.push({ x: pr.x, y: pr.y, h: 30, size: 1, flame: false });
@@ -1130,7 +1169,8 @@ const Render = {
       const f = Math.sin(b.rot), c = Math.cos(b.rot), fx = b.x + f * 30, fy = b.y + c * 30; // devant l'établi
       const ring = new THREE.Mesh(new THREE.RingGeometry(0.8, 1, 40).rotateX(-Math.PI / 2), new THREE.MeshBasicMaterial({ color: new THREE.Color('#ff9a2a').multiplyScalar(1.6), transparent: true, opacity: 0.8, depthWrite: false }));
       ring.position.set(toX(fx), 0.8, toZ(fy)); s.add(ring);
-      const gh = buildGun('rifle', { metal: holo, wood: holo }); gh.traverse(o => { if (o.isMesh) { o.material = holo; o.castShadow = false; } });
+      let gh = buildGun('rifle', { metal: holo, wood: holo }); gh.remove(gh.userData.flash); gh.traverse(o => { if (o.isMesh) { o.material = holo; o.castShadow = false; } });
+      gh = bake(gh); gh.traverse(o => { if (o.isMesh) { o.castShadow = false; o.receiveShadow = false; } }); // un seul maillage par hologramme
       gh.scale.setScalar(1.15); gh.position.set(toX(b.x), 52, toZ(b.y)); s.add(gh);
       const sign = b.big ? this.makeSign('🔫 ARMURERIE', 'ARMES · PIÈCES · PEINTURES', '#ffc21a') : this.makeSign('🔧 ÉTABLI', 'AMÉLIORER L\'ARME', '#ff9a2a');
       sign.scale.setScalar(b.big ? 0.85 : 0.55); sign.position.set(toX(b.x), b.big ? 78 : 70, toZ(b.y) + 2); s.add(sign);
@@ -1282,8 +1322,48 @@ const Render = {
     const tank = mesh(G.cyl(26, 26, 34, 16), mat('#8a5a3a', { r: 0.7, m: 0.3 })); tank.position.y = 105; tw.add(tank);
     const troof = mesh(new THREE.ConeGeometry(28, 16, 16), metalR); troof.position.y = 130; tw.add(troof);
     tw.position.set(-W / 2 - 260, 0, -H / 2 - 220); s.add(tw);
+    this.mergeStatic(firstChild);
   },
 
+  /** Performances : tout le décor fixe (épaves, caisses, clôtures, gravats, rochers…) est fusionné en
+      un maillage par matériau. Des centaines d'objets en moins à parcourir et à dessiner à chaque image
+      (et autant dans la passe d'ombres). Les objets animés (portes, barricades, bâtiments qui s'effacent,
+      établis, corbeaux, voiture…) ne sont pas touchés. */
+  mergeStatic(firstChild) {
+    const s = this.scene; s.updateMatrixWorld(true);
+    const skip = new Set([...this.gates.map(g => g.group), ...this.blds.map(b => b.root), ...Object.values(this.doors).map(d => d.leaf.parent),
+      ...this.benchFx.flatMap(f => [f.ring, f.holo, f.sign]), ...this.crows.map(c => c.o), this.heli, this.heliShadow, this.carObj, ...Object.values(this.veils)]);
+    const shared = new Set(Object.values(MC)); // matériaux du cache mat() : jamais modifiés après coup
+    // un seul matériau « couleurs par sommet » pour tout le décor mat, un autre pour le métal ; découpé en cases de
+    // 600 unités pour que les cases hors de l'écran ne soient pas dessinées
+    const bucketMat = { matte: new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.85, metalness: 0.05 }), metal: new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.5, metalness: 0.5 }) };
+    const groups = new Map(), gone = [], CELL = 600;
+    for (const top of s.children.slice(firstChild)) {
+      if (skip.has(top)) continue;
+      top.traverse(o => {
+        const m = o.material;
+        if (!o.isMesh || o.isInstancedMesh || o.isSkinnedMesh || o.userData.keep || !m || !m.isMeshStandardMaterial || m.map || m.transparent || !(shared.has(m) || m.userData.merge)) return;
+        let gg;
+        try {
+          gg = o.geometry.clone().applyMatrix4(o.matrixWorld);
+          if (gg.index) gg = gg.toNonIndexed();
+          for (const k of Object.keys(gg.attributes)) if (k !== 'position' && k !== 'normal') gg.deleteAttribute(k);
+          if (m.flatShading || !gg.attributes.normal) gg.computeVertexNormals(); // facettes
+        } catch (e) { return; }
+        const emis = m.emissive && m.emissive.r + m.emissive.g + m.emissive.b > 0;
+        const bucket = emis ? m.uuid : m.metalness >= 0.35 ? 'metal' : 'matte';
+        if (!emis) { const n = gg.attributes.position.count, col = new Float32Array(n * 3); for (let i = 0; i < n; i++) { col[i * 3] = m.color.r; col[i * 3 + 1] = m.color.g; col[i * 3 + 2] = m.color.b; } gg.setAttribute('color', new THREE.BufferAttribute(col, 3)); }
+        const e = o.matrixWorld.elements, key = `${Math.floor(e[12] / CELL)},${Math.floor(e[14] / CELL)}|${bucket}|${o.castShadow ? 1 : 0}${o.receiveShadow ? 1 : 0}`;
+        if (!groups.has(key)) groups.set(key, { mat: emis ? m : bucketMat[bucket], cast: o.castShadow, recv: o.receiveShadow, list: [] });
+        groups.get(key).list.push(gg);
+        gone.push(o);
+      });
+    }
+    for (const o of gone) o.parent.remove(o);
+    // retire les groupes devenus vides
+    for (const top of s.children.slice(firstChild)) { if (skip.has(top) || top.isMesh || top.isLine || top.isPoints) continue; let any = false; top.traverse(o => { if (o.isMesh || o.isLine || o.isPoints || o.isLight) any = true; }); if (!any) s.remove(top); }
+    for (const g of groups.values()) { const m = mesh(mergeGeometries(g.list, false), g.mat, g.cast, g.recv); m.matrixAutoUpdate = false; s.add(m); }
+  },
   /** Graffiti peint à la bombe au sol */
   makeGraffiti(dc) {
     const c = document.createElement('canvas'); c.width = 1024; c.height = 192;
@@ -1322,6 +1402,8 @@ const Render = {
     // ombres de contact (disque sombre doux sous chaque personnage)
     this.contactMat = new THREE.MeshBasicMaterial({ color: '#000000', alphaMap: this.dotTex, transparent: true, opacity: 0.45, depthWrite: false });
     this.contactGeo = new THREE.PlaneGeometry(1, 1).rotateX(-Math.PI / 2);
+    // ombres de contact de tous les zombies : un seul objet instancié
+    this.contactIM = new THREE.InstancedMesh(this.contactGeo, this.contactMat, 200); this.contactIM.count = 0; this.contactIM.frustumCulled = false; this.contactIM.renderOrder = 1; this.scene.add(this.contactIM);
     // pools d'objets réutilisés
     this.pools = { tracer: [], orb: [], nut: [], warn: [], barrel: [], grenade: [], mine: [], drone: [], fire: [], medkit: [], bomb: [], magnet: [], chest: [], frenzy: [], explosive: [], haste: [], ring: [], turret: [], trap: [], gascan: [], battery: [], gen: [], zone: [], crate: [], acid: [] };
     // traces au sol (zombies abattus, explosions) : persistent puis s'estompent
@@ -1348,7 +1430,7 @@ const Render = {
 
   take(kind, make) {
     const pool = this.pools[kind];
-    if (pool.used >= pool.length) { const o = make(); this.scene.add(o); pool.push(o); }
+    if (pool.used >= pool.length) { const o = make(); this.scene.add(o); pool.push(o); if (this.staticShadows && !this.FIXED_KINDS[kind]) o.traverse(m => { if (m.isMesh) { m.userData.cast = m.castShadow; m.castShadow = false; } }); }
     const o = pool[pool.used++]; o.visible = true; return o;
   },
   beginPools() { for (const k in this.pools) this.pools[k].used = 0; },
@@ -1401,7 +1483,7 @@ const Render = {
     this.vw = vw; this.vh = vh;
     this.renderer.setSize(vw, vh, false);
     if (this.composer) { this.composer.setSize(vw, vh); this.bloom.resolution.set(vw / 2, vh / 2); }
-    this.dpr = Math.min(window.devicePixelRatio || 1, 2);
+    this.dpr = this.lite ? 1 : Math.min(window.devicePixelRatio || 1, 2);
     this.hud.width = Math.round(vw * this.dpr); this.hud.height = Math.round(vh * this.dpr);
     this.ui = U.clamp(Math.min(vw, vh) / 520, 0.8, 1.3);
     const cs = this.probe ? getComputedStyle(this.probe) : null;
@@ -1432,6 +1514,7 @@ const Render = {
       a.guns.rifle.visible = true; a.gunId = 'rifle';
       a.gunMats = this.gunMatList; a.modSig = null;
       a.face = 0; this.scene.add(a.root);
+      if (this.staticShadows) this.setStaticShadows(true);
       play(a, 'Idle_Gun');
     }
     const a = this.player;
@@ -1648,12 +1731,13 @@ const Render = {
   SHOW: { x: MAP.car.x + 58, y: MAP.car.y + 12 },
 
   syncEnemies(g, dt) {
-    const seen = new Set();
+    const seen = new Set(), half = this.halfAnim && g.enemies.length > 20; let idx = 0, ci = 0;
+    const cm = this.contactIM, CM = this._cmM || (this._cmM = new THREE.Matrix4());
+    this.frameN = (this.frameN || 0) + 1;
     for (const e of g.enemies) {
       let a = e._m;
       if (!a) {
-        a = makeZombie(e.def.model, e.elite);
-        this.addContact(a, e.r * 2);
+        a = makeZombie(e.def.model, e.elite); // (ombre douce au sol : dessinée pour toute la horde en un seul appel, voir contactIM)
         a.root.rotation.y = Math.atan2(g.player ? g.player.x - e.x : 0, g.player ? g.player.y - e.y : 1);
         e._m = a; this.scene.add(a.root); this.enemyModels.add(a);
         play(a, a.type.walk, { fade: 0, speed: a.type.speed });
@@ -1666,9 +1750,13 @@ const Render = {
       const onScreen = v.x > -1.25 && v.x < 1.25 && v.y > -1.3 && v.y < 1.3;
       a.root.visible = onScreen;
       if (!onScreen) { a.root.position.set(toX(e.x), 0, toZ(e.y)); a.skipDt = (a.skipDt || 0) + dt; continue; }
+      if (ci < cm.instanceMatrix.count) { const sz = e.r * 2; CM.makeScale(sz, 1, sz * 0.8).setPosition(toX(e.x), 0.8, toZ(e.y)); cm.setMatrixAt(ci++, CM); }
+      // machines lentes, grosse horde : chaque zombie n'est animé qu'une image sur deux (en alternance)
+      if (half && ((idx++ + this.frameN) & 1)) { a.root.position.x = toX(e.x); a.root.position.z = toZ(e.y); a.skipDt = (a.skipDt || 0) + dt; continue; }
       const adt = dt + Math.min(a.skipDt || 0, 0.5); a.skipDt = 0; // rattrape l'animation en revenant à l'écran
       this.animateEnemy(a, e, g, adt);
     }
+    cm.count = ci; cm.instanceMatrix.needsUpdate = true;
     // morts : animation de chute, puis ils s'enfoncent dans le sable
     for (const a of this.enemyModels) if (!seen.has(a)) {
       this.enemyModels.delete(a); a.dieT = 0; this.dying.push(a);
@@ -2048,6 +2136,7 @@ const Render = {
     if (menuDog && this.dog) this.dog.face = 0.5;
     if (!this.dog) {
       const a = this.dog = makeActor(ASSETS.dog, 30, new THREE.Color('#e8e4dc'));
+      if (this.staticShadows) a.root.traverse(m => { if (m.isMesh) { m.userData.cast = m.castShadow; m.castShadow = false; } });
       this.addContact(a, 22); this.scene.add(a.root); a.face = 0;
       play(a, 'Idle');
     }
@@ -2307,19 +2396,16 @@ const Render = {
       résolution réduite → sans halo lumineux → sans ombres → résolution minimale */
   autoQuality(g) {
     const now = performance.now(), ft = now - (this._lastFrame || now); this._lastFrame = now;
-    if (Save.data.settings.quality !== 'auto' || g.state !== 'playing' || ft > 250) { this._aqT = 0; this._aqSum = 0; this._aqN = 0; return; }
+    // (on ignore les 3 premières secondes de la partie : le navigateur prépare encore l'affichage)
+    if (Save.data.settings.quality !== 'auto' || g.state !== 'playing' || ft > 1500 || g.stats.time < 3) { this._aqT = 0; this._aqSum = 0; this._aqN = 0; return; }
     this._aqT = (this._aqT || 0) + ft; this._aqSum = (this._aqSum || 0) + ft; this._aqN = (this._aqN || 0) + 1;
     if (this._aqT < 2000) return;
     const avg = this._aqSum / this._aqN; this._aqT = 0; this._aqSum = 0; this._aqN = 0;
-    if (avg < 21) return; // sous ~48 images/s : on allège d'un cran
-    this.aqLevel = (this.aqLevel || 0) + 1;
-    const r = this.renderer;
-    if (this.aqLevel === 1) r.setPixelRatio(Math.max(1, r.getPixelRatio() * 0.75));
-    else if (this.aqLevel === 2 && this.composer) this.composer = null;
-    else if (this.aqLevel === 3) this.sun.castShadow = false;
-    else if (this.aqLevel === 4) { r.setPixelRatio(0.75); this.lite = true; }
-    else return;
-    this.resize();
+    if (avg < 21) return; // sous ~48 images/s : on allège ; très lent → plusieurs crans d'un coup
+    const n = Math.min(6, (this.aqLevel || 0) + (avg > 70 ? 3 : avg > 40 ? 2 : 1));
+    if (n === (this.aqLevel || 0)) return;
+    this.applyAq(n);
+    Save.data.settings.aq = n; Save.save(); // retenu pour les prochains lancements (remis à zéro en changeant la qualité)
   },
 
   /* ------------------------------ établi d'armurier ------------------------------ */
@@ -2491,7 +2577,13 @@ const Render = {
     this.focus.x += (fx - this.focus.x) * k; this.focus.z += (fz - this.focus.z) * k;
     cam.position.copy(this.camOffset).multiplyScalar(zoom).add(this.focus);
     // le soleil (et sa carte d'ombres) suit la caméra
-    this.sun.position.set(this.focus.x - 380, 620, this.focus.z + 300); this.sun.target.position.set(this.focus.x, 0, this.focus.z);
+    // (par pas de quelques unités : l'ombre ne « frétille » pas, et en mode ombres fixes elle n'est recalculée que si le soleil a bougé)
+    const snap = 1120 / this.sun.shadow.mapSize.x * 64, sx = Math.round(this.focus.x / snap) * snap, sz = Math.round(this.focus.z / snap) * snap;
+    this.sun.position.set(sx - 380, 620, sz + 300); this.sun.target.position.set(sx, 0, sz);
+    if (this.staticShadows) {
+      this._shT = (this._shT || 0) + dt;
+      if (sx !== this._sx || sz !== this._sz || this._shT > 0.5) { this.sun.shadow.needsUpdate = true; this._shT = 0; this._sx = sx; this._sz = sz; }
+    }
     if (CONFIG.screenShake && g.shake > 0) { cam.position.x += U.rand(-1, 1) * g.shake * 0.5; cam.position.y += U.rand(-1, 1) * g.shake * 0.5; }
     this.camTarget.set(this.focus.x, 0, this.focus.z + this.lookShift * zoom);
     cam.lookAt(this.camTarget);

@@ -29,7 +29,8 @@ const Save = {
     this.data = Object.assign(def, d);
     this.data.settings = Object.assign(def.settings, d.settings || {});
     this.data.stats = Object.assign(def.stats, d.stats || {});
-    if (!CHARACTERS[this.data.char] || !this.data.chars[this.data.char]) this.data.char = 'survivor';
+    const c = CHARACTERS[this.data.char]; // personnage acheté, ou débloqué par un succès (Vega)
+    if (!c || !(this.data.chars[this.data.char] || (c.unlock && this.data.ach[c.unlock]))) this.data.char = 'survivor';
   },
 
   save() { U.storage.set(this.KEY, this.data); },

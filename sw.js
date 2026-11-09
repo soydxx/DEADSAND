@@ -1,6 +1,6 @@
 /* Service worker : met tout le jeu en cache pour jouer hors ligne.
    Changez VERSION à chaque mise à jour du jeu pour forcer le rafraîchissement. */
-const VERSION = 'deadsand-v17';
+const VERSION = 'deadsand-v18';
 const WORLD_MODELS = ['barracks', 'bld_a', 'bld_b', 'bld_big', 'bld_business', 'bld_c', 'car', 'container_green', 'container_red', 'dog', 'gascan', 'gastank', 'police', 'suv'];
 const FILES = [
   './', 'index.html', 'style.css', 'manifest.webmanifest',

@@ -371,7 +371,8 @@ const Game = {
       }
       case 'set': {
         const v = data.val === 'true' ? true : data.val === 'false' ? false : isNaN(Number(data.val)) ? data.val : Number(data.val);
-        S.settings[data.key] = v; Save.save(); Sfx.applyVolumes(); if (data.key === 'realSfx') Sfx.setReal(v); UI.refreshOptions();
+        S.settings[data.key] = v; if (data.key === 'quality') S.settings.aq = 0; // on repart de la pleine qualité
+        Save.save(); Sfx.applyVolumes(); if (data.key === 'realSfx') Sfx.setReal(v); UI.refreshOptions();
         break;
       }
       case 'reload': location.reload(); break;

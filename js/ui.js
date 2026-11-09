@@ -210,6 +210,7 @@ const UI = {
         <button class="btn big" data-action="start" autofocus>Commencer</button>
         <button class="btn small ghost title-set" data-action="settings">⚙️ Paramètres</button>
         ${best.score ? `<p class="best">Record : <b>${best.score}</b> pts · vague ${best.wave}</p>` : ''}
+        ${Render.softGL ? '<p class="hint warn">⚠️ Accélération graphique désactivée dans ce navigateur : le jeu sera lent (voir ⚙️ Paramètres).</p>' : ''}
         <p class="press">${touch ? 'Touchez « Commencer »' : 'Appuyez sur Entrée'}</p>
       </div>
     `, 300, 'title-screen', 'title');
@@ -426,6 +427,8 @@ const UI = {
       <div class="opt"><span>Pseudo</span><input id="name-input" class="name-input" maxlength="16" placeholder="Survivante" value="${(Save.data.name || '').replace(/"/g, '&quot;')}"></div>
       <div class="opt"><span>Qualité graphique</span>${seg('quality', [['auto', 'Auto'], ['high', 'Haute'], ['low', 'Éco']])}</div>
       <p class="hint">Si le jeu rame : choisissez <b>Éco</b> (sans ombres ni halo, résolution réduite). Économie : pour les téléphones et PC modestes. ${inRun ? 'S\'appliquera au prochain lancement du jeu (la partie en cours n\'est pas interrompue).' : 'Appliqué au rechargement.'}</p>
+      <p class="hint">Carte graphique : ${Render.gpuName ? Render.gpuName.replace(/^ANGLE \((.*)\)$/, '$1').split(',').slice(0, 2).join(',').replace(/ \(0x[0-9a-f]+\)/i, '') : 'inconnue'}${s.quality === 'auto' && Render.aqLevel ? ` · allègement automatique ${Render.aqLevel}/6` : ''}</p>
+      ${Render.softGL ? '<p class="hint warn">⚠️ Votre navigateur n\'utilise pas la carte graphique (rendu logiciel) : le jeu sera lent. Activez « l\'accélération matérielle » dans les paramètres du navigateur (Chrome / Edge : Paramètres → Système), puis relancez-le.</p>' : ''}
       <div class="opt"><span>Bruitages</span>${seg('sfx', vol)}</div>
       <div class="opt"><span>Musique</span>${seg('music', vol)}</div>
       <div class="opt"><span>Vibrations</span>${seg('vibrate', [[true, 'Oui'], [false, 'Non']])}</div>
