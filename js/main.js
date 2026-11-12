@@ -17,13 +17,18 @@ const Game = {
   choices: [], newAch: [], achTimer: 0, camZoom: 1, showPlayer: true,
   best: U.storage.get('arena.best', { score: 0, wave: 0 }),
 
-  newRun() {
+  /** opts.tutorial : partie guidée (js/tutorial.js), sans vagues ni récompenses de fin */
+  newRun(opts = {}) {
     const p = this.player = Entities.createPlayer();
     this.charId = Save.data.char;
+    const L = Loadout.current(); // classe choisie dans la Préparation
+    Loadout.applyPrimary(p, L);  // réglages de l'arme principale, avant les bonus
+    p.dmgBase = p.weapon.damage; // référence des bonus de dégâts (équipement, arme secondaire)
     CHARACTERS[this.charId].apply(p);
-    for (const s of SHOP) { const l = Save.data.perm[s.id] || 0; if (l) s.apply(p, l); }
-    // règles choisies dans la Préparation (plus dur → plus de ferraille et d'XP)
-    const chosen = runModsChosen();
+    p.charDmg = p.weapon.damage / p.dmgBase; // bonus de dégâts du personnage (repris par l'arme secondaire)
+    Loadout.applyPerks(p, L);
+    // règles choisies dans la Préparation (plus dur → plus de ferraille et d'XP) ; aucune pendant le tutoriel
+    const chosen = opts.tutorial ? [] : runModsChosen();
     this.mods = Object.fromEntries(chosen.map(m => [m.id, true]));
     this.modBonus = runModsBonus(chosen);
     p.scrapMult *= 1 + this.modBonus;
@@ -32,10 +37,12 @@ const Game = {
     this.pickups = []; this.particles = []; this.texts = [];
     this.barrels = []; this.grenades = []; this.mines = []; this.fireZones = []; this.drones = []; this.fx = []; this.burrowers = [];
     this.weapons = {}; this.magnetT = 0; this.hitStop = 0; this.flash = 0; this.lock = null;
-    this.stats = { kills: 0, score: 0, time: 0, bosses: 0, elites: 0, barrels: 0, evolved: 0, rolls: 0 };
+    this.stats = { kills: 0, score: 0, time: 0, bosses: 0, elites: 0, barrels: 0, evolved: 0, rolls: 0, hurtBy: {} };
+    this.death = null; this.lastBlow = null; this.tut = null;
     this.upLevels = {};
     this.coins = 0;
     this.newAch = [];
+    this.genFails = 0;
     this.zonesOpened = 0; this.nightsSurvived = 0; this.revives = 0; this.noRevive = false; this.reviveFromBank = 0;
     this.wave = new WaveManager(this);
     Story.begin(this);            // carte réinitialisée + cinématique d'arrivée
@@ -43,11 +50,13 @@ const Game = {
     Inventory.init(this);
     Gunsmith.init(this);
     Fun.init(this);
+    Forts.init(this);
+    Loadout.equip(this, L);
     if (this.charId === 'mechanic') this.inv.turret = (this.inv.turret || 0) + 1; // Vega : une tourelle offerte
-    if (this.mods.shotgun) { this.weapons.shotgun = { lvl: 1, t: 0, evo: false, aux: [] }; this.upLevels.w_shotgun = 1; this.active = 'shotgun'; }
     Input.reset(); Input.capture = null; UI.rebinding = null;
     UI.hide();
     UI.setHudButtons(true);
+    if (opts.tutorial) Tutorial.begin(this);
   },
 
   startWave(n) {
@@ -57,11 +66,17 @@ const Game = {
     this.waveCleared = false;
     Story.onWaveStart(this, n);
     Fun.startChallenge(this, n);
-    this.player.regenPool = this.player.maxHp * 0.35; this.lastStand = 0;
+    this.player.regenPool = this.player.maxHp * 0.35 * (this.player.regenPoolMult || 1); this.lastStand = 0;
+    const F = CONFIG.scrapFade; this.scrapScale = Math.max(F.min, 1 - Math.max(0, n - F.from) * F.perWave);
     Entities.placeBarrels(this);
-    const boss = this.wave.isBoss;
-    this.showBanner(boss ? `VAGUE ${n} · BOSS` : this.night ? `VAGUE ${n} · NUIT` : `VAGUE ${n}`,
-      boss ? `${ENEMY_TYPES[this.wave.bossType].name} arrive… tenez bon !` : this.event === 'rush' ? 'Horde de coureurs en approche !' : this.event === 'supply' ? 'Ravitaillement largué sur la carte' : this.night ? 'Ils sont plus nombreux dans le noir' : '', 2, boss ? '#ff5a3a' : this.night ? '#8ab4ff' : null);
+    const boss = this.wave.isBoss, ev = this.event, W = this.wave;
+    const title = ev === 'doubleboss' ? `VAGUE ${n} · DOUBLE BOSS` : boss ? `VAGUE ${n} · BOSS` : ev === 'runners' ? `VAGUE ${n} · COUREURS` : ev === 'blackout' ? `VAGUE ${n} · PANNE DE COURANT` : this.night ? `VAGUE ${n} · NUIT` : `VAGUE ${n}`;
+    const sub = ev === 'doubleboss' ? `${ENEMY_TYPES[W.bossType].name} et ${ENEMY_TYPES[W.bossType2].name} arrivent… · prime ×1,5`
+      : boss ? `${ENEMY_TYPES[W.bossType].name} arrive… tenez bon !`
+      : ev === 'runners' ? 'Que des coureurs et des rampants ! · prime ×1,5'
+      : ev === 'blackout' ? 'Plus de lampe torche ni de lampadaires… · prime ×1,5'
+      : ev === 'rush' ? 'Horde de coureurs en approche !' : ev === 'supply' ? 'Ravitaillement largué sur la carte' : this.night ? 'Ils sont plus nombreux dans le noir' : '';
+    this.showBanner(title, sub, 2.2, boss ? '#ff5a3a' : ev === 'runners' ? '#ffb030' : this.night ? '#8ab4ff' : null);
     Sfx.play(boss ? 'boss' : 'wave');
   },
 
@@ -84,7 +99,8 @@ const Game = {
       if (this.hitStop > 0) { this.hitStop -= dt; return; }
       const p = this.player;
       this.stats.time += dt;
-      if (this.phase === 'break') Story.updateBreak(this, dt);
+      if (this.phase === 'tut') Tutorial.update(this, dt);
+      else if (this.phase === 'break') Story.updateBreak(this, dt);
       else { Story.updateWave(this, dt); this.wave.update(dt); }
       const tgt = p.inside ? World.doorOf(p.inside) : p;
       World.updateFlow(tgt.x, tgt.y, dt);
@@ -93,6 +109,7 @@ const Game = {
       Allies.update(this, dt);
       Story.updateShelter(this, dt);
       Entities.updateEnemies(this, dt);
+      Forts.update(this, dt);
       Entities.updateBurrowers(this, dt);
       // grognements : plus fréquents et plus forts quand la horde est proche
       if ((this.groanT = (this.groanT || 1) - dt) <= 0 && this.enemies.length) {
@@ -133,9 +150,11 @@ const Game = {
       const bonus = this.wave.num * CONFIG.waveClearBonus;
       this.stats.score += bonus;
       // prime de ferraille (remplace l'ancien choix d'amélioration) : à dépenser aux établis et dans les refuges
-      const scrap = Math.round((CONFIG.waveScrap.base + this.wave.num * CONFIG.waveScrap.perWave) * this.player.scrapMult);
+      const W = CONFIG.waveScrap, special = Story.specialWave(this); // vague spéciale : prime ×1,5
+      const scrap = Math.round((W.base + Math.min(this.wave.num, W.capWave) * W.perWave) * this.player.scrapMult * (special ? 1.5 : 1));
       this.coins += scrap;
-      this.showBanner('VAGUE REPOUSSÉE !', `+${bonus} pts · +${scrap} 🔩`, 1.6, '#ffc21a');
+      if (special) this.stats.specials = (this.stats.specials || 0) + 1;
+      this.showBanner('VAGUE REPOUSSÉE !', `+${bonus} pts · +${scrap} 🔩${special ? ' (vague spéciale ×1,5)' : ''}`, 1.6, '#ffc21a');
       Entities.petals(this, 60);
       Sfx.play('clear');
       return;
@@ -154,6 +173,12 @@ const Game = {
     Sfx.unlock();
     if (this.state === 'intro') { Story.endIntro(this); return; }
     if (this.state !== 'playing' || this.player.inside) return;
+    // mode construction : clic = poser, clic droit = démonter l'élément visé
+    if (this.build && this.build.on) {
+      if (clear) { const c = Render.cursorWorld(); if (c) Forts.removeAt(this, c.x, c.y); }
+      else Forts.place(this);
+      return;
+    }
     if (clear) { this.lock = null; return; }
     const t = Render.pick(this, sx, sy);
     if (t) { this.lock = t; Sfx.play('lock'); } else this.lock = null;
@@ -181,6 +206,9 @@ const Game = {
     this.deathTimer = 1.6;
     this.shake = 25;
     const p = this.player;
+    // cause de la mort (affichée en fin de partie) : dernier coup reçu + zombies autour
+    const b = this.lastBlow, around = this.enemies.filter(e => !e.dead && Math.hypot(e.x - p.x, e.y - p.y) < 150).length;
+    this.death = { k: b ? b.k : 'unknown', n: b ? b.n : 'La horde', ic: b ? b.ic : '🧟', around, wave: this.wave.num };
     Entities.puff(this, p.x, p.y, 12, 22);
     Entities.burst(this, p.x, p.y, '#b8322a', 30, 260, 4, 1.1);
     Input.releaseJoystick();
@@ -202,6 +230,8 @@ const Game = {
     Save.data.stats.kills += s.kills; Save.data.stats.bosses += s.bosses; Save.data.stats.runs++;
     Save.data.charKills = Save.data.charKills || {};
     Save.data.charKills[this.charId] = (Save.data.charKills[this.charId] || 0) + s.kills; // défis de tenues
+    // causes de mort cumulées (pour voir ce qui est trop dur d'une partie à l'autre)
+    if (this.death && !this.victory && !this.noRevive) { const D = Save.data.deathBy = Save.data.deathBy || {}; D[this.death.k] = (D[this.death.k] || 0) + 1; }
     this.checkAchievements();
     this.progress = Progress.onRunEnd(this); // expérience, niveaux, missions
     // tableau des 10 meilleures parties (local)
@@ -210,6 +240,7 @@ const Game = {
     const board = Save.data.board = (Save.data.board || []).concat(entry).sort((a, b) => b.score - a.score).slice(0, 10);
     this.boardRank = board.indexOf(entry) + 1;
     Save.save();
+    Online.submit(entry); // classement en ligne entre amis (si configuré, voir js/online.js)
     UI.showGameOver(this, this.best, isNewBest, banked, this.newAch);
   },
 
@@ -242,11 +273,11 @@ const Game = {
 
   /** Remet le décor au calme (parking, jour) derrière les menus */
   resetScene() {
-    this.player = null; this.banner = null;
+    this.player = null; this.banner = null; this.tut = null;
     this.enemies = []; this.pBullets = []; this.eBullets = []; this.pickups = []; this.texts = [];
     this.barrels = []; this.grenades = []; this.mines = []; this.fireZones = []; this.drones = [];
     this.turrets = []; this.traps = []; this.objective = null; this.dog = null; this.crates = []; this.acid = [];
-    this.gunMods = null; this.gs = null; this.burrowers = [];
+    this.gunMods = null; this.gs = null; this.burrowers = []; this.helpers = []; this.rescues = []; this.blackout = false; this.forts = []; this.build = null;
     this.night = false; this.storm = null; this.camZoom = 1; this.showPlayer = true; this.lock = null;
     if (this.wave) this.wave.warnings = [];
     World.reset();
@@ -275,8 +306,9 @@ const Game = {
   /** Préparation : personnages, atelier, succès, options, puis « Lancer la partie » */
   toLobby(tab) {
     if (this.state !== 'menu') { this.state = 'menu'; this.resetScene(); }
+    UI.classPick = null;
     UI.previewChar = null;
-    UI.showLobby(tab || 'chars');
+    UI.showLobby(tab || 'classes');
   },
 
   /* ------------------------------ réanimation ------------------------------ */
@@ -327,7 +359,8 @@ const Game = {
       case 'title': this.toMenu(); break;
       case 'play': this.newRun(); break;
       case 'resume': this.resume(); break;
-      case 'quit': this.noRevive = true; this.state = 'dying'; this.deathTimer = 0; UI.hide(); UI.setHudButtons(false); break;
+      case 'tutorial': this.goLandscape(); this.newRun({ tutorial: true }); break;
+      case 'quit': if (this.tut) { this.toLobby(); break; } this.noRevive = true; this.state = 'dying'; this.deathTimer = 0; UI.hide(); UI.setHudButtons(false); break;
       case 'quitAsk': if (this.state === 'paused') UI.showQuitConfirm(this); break;
       case 'rebind':
         UI.rebinding = data.id; UI.refreshOptions();
@@ -350,7 +383,7 @@ const Game = {
       case 'gcat': UI.garageCat = data.cat; UI.showLobby('garage'); break;
       case 'cosBuy': if (Cosmetics.buy(data.id)) { Sfx.play('buy'); this.checkAchievementsMenu(); } UI.showLobby('garage'); break;
       case 'cosEquip': Cosmetics.equip(data.id); UI.showLobby('garage'); break;
-      case 'chars': case 'shop': case 'ach': case 'options': this.toLobby(action); break;
+      case 'chars': case 'classes': case 'ach': case 'options': this.toLobby(action); break;
       case 'preview':
         UI.previewChar = data.id;
         if (charOwned(data.id)) { S.char = data.id; Save.save(); }
@@ -364,11 +397,6 @@ const Game = {
         if (c && !c.unlock && !charOwned(data.id) && S.bank >= c.cost) { S.bank -= c.cost; S.chars[data.id] = true; S.char = data.id; Save.save(); Sfx.play('buy'); UI.showLobby('chars'); }
         break;
       }
-      case 'buyPerm': {
-        const it = SHOP.find(s => s.id === data.id), l = S.perm[data.id] || 0;
-        if (it && l < it.max && S.bank >= it.cost(l)) { S.bank -= it.cost(l); S.perm[data.id] = l + 1; Save.save(); Sfx.play('buy'); this.checkAchievementsMenu(); UI.showLobby('shop'); }
-        break;
-      }
       case 'set': {
         const v = data.val === 'true' ? true : data.val === 'false' ? false : isNaN(Number(data.val)) ? data.val : Number(data.val);
         S.settings[data.key] = v; if (data.key === 'quality') S.settings.aq = 0; // on repart de la pleine qualité
@@ -376,7 +404,23 @@ const Game = {
         break;
       }
       case 'reload': location.reload(); break;
-      case 'map': if (MAPS[data.id] && MAP.id !== data.id && (data.id === 'desert' || S.ach.escape)) { S.settings.map = data.id; Save.save(); location.reload(); } break;
+      case 'prestigeAsk': UI.prestigeAsk = true; UI.showLobby('missions'); break;
+      case 'prestigeNo': UI.prestigeAsk = false; UI.showLobby('missions'); break;
+      case 'prestige':
+        UI.prestigeAsk = false;
+        if (Progress.doPrestige()) { Sfx.play('achieve'); UI.toast(`⭐ Prestige ${Progress.prestige()} !`, `Retour au niveau 1 · +${PRESTIGE.bank} 🔩 · tout reste débloqué`); }
+        UI.showLobby('missions'); break;
+      // création de classe
+      case 'clsSel': S.classSel = Number(data.i); Save.save(); UI.classPick = null; UI.showLobby('classes'); break;
+      case 'clsNew': if (Loadout.add()) { Sfx.play('buy'); UI.classPick = 'primary'; } UI.showLobby('classes'); break;
+      case 'clsDel': Loadout.remove(S.classSel); UI.classPick = null; UI.showLobby('classes'); break;
+      case 'clsPick': UI.classPick = UI.classPick === data.slot ? null : data.slot; UI.showLobby('classes'); break;
+      case 'clsSet': {
+        const sl = data.slot, ok = sl === 'primary' ? Loadout.open(PRIMARIES[data.id]) : sl === 'secondary' ? Loadout.open(SECONDARIES[data.id]) : sl === 'lethal' ? Loadout.open(LETHALS[data.id]) : sl === 'tactical' ? Loadout.open(TACTICALS[data.id]) : Loadout.open(Loadout.perk(Number(sl.slice(4)), data.id));
+        if (ok) { if (sl.startsWith('perk')) Loadout.set('perk', data.id, Number(sl.slice(4))); else Loadout.set(sl, data.id); Sfx.play('reload'); UI.classPick = null; }
+        UI.showLobby('classes'); break;
+      }
+      case 'map': if (MAPS[data.id] && MAP.id !== data.id && mapOpen(data.id)) { S.settings.map = data.id; Save.save(); location.reload(); } break;
       case 'mod': { const m = S.settings.runMods = S.settings.runMods || {}; m[data.id] = !m[data.id]; Save.save(); UI.showLobby('chars'); break; }
       // établi d'armurier
       case 'gsClose': Gunsmith.close(this); break;
@@ -418,6 +462,10 @@ const Game = {
         else if (UI.screen === 'lobby' && (code === 'Enter' || code === 'NumpadEnter')) this.newRun();
         else if (UI.screen === 'lobby' && code === 'Escape') this.toMenu();
         break;
+      case 'tutend':
+        if ((code === 'Enter' || code === 'NumpadEnter') && !UI.isLocked()) this.newRun();
+        else if (code === 'Escape') this.toLobby();
+        break;
       case 'gameover':
         if (confirm && !UI.isLocked()) this.newRun();
         if (code === 'Escape') this.toLobby();
@@ -430,6 +478,14 @@ const Game = {
       case 'playing': {
         const p = this.player, act = Inventory.actionFor(code);
         if (p.inside) { if (act === 'interact' || code === 'Escape') Story.leaveShelter(this); break; }
+        // mode construction : 1-2-3 choisissent, Entrée pose, Échap ou B referment
+        if (this.build && this.build.on) {
+          const kinds = Object.keys(FORTS), d = /^Digit([1-9])$/.exec(code);
+          if (d && kinds[d[1] - 1]) { Forts.select(this, kinds[d[1] - 1]); break; }
+          if (code === 'Enter' || code === 'NumpadEnter') { Forts.place(this); break; }
+          if (code === 'Escape' || act === 'build') { Forts.toggle(this, false); break; }
+        }
+        if (act === 'build') { Forts.toggle(this); break; }
         if (code === 'Escape' || code === 'KeyP') this.pause();
         else if (act === 'roll' || ((code === 'ShiftLeft' || code === 'ShiftRight') && !act)) Entities.roll(this);
         else if (act === 'interact') this.contextAction('enter');
@@ -453,7 +509,7 @@ const Game = {
         else if (code === 'ArrowLeft' || code === 'ArrowRight' || code === 'KeyQ' || code === 'KeyA' || code === 'KeyD') {
           const guns = Gunsmith.guns(this), i = guns.indexOf(gs.gun), d = code === 'ArrowLeft' || code === 'KeyQ' || code === 'KeyA' ? -1 : 1;
           if (guns.length > 1) Gunsmith.setGun(this, guns[(i + d + guns.length) % guns.length]);
-        } else if (code === 'Tab') { const T = ['parts', 'arms', 'paint']; gs.tab = T[(T.indexOf(gs.tab) + 1) % 3]; gs.skin = null; UI.showGunsmith(this); }
+        } else if (code === 'Tab') { const T = ['parts', 'gear', 'paint']; gs.tab = T[(T.indexOf(gs.tab) + 1) % 3]; gs.skin = null; UI.showGunsmith(this); }
         break;
       }
     }
@@ -493,12 +549,13 @@ window.bootGame = function boot() {
   }, { passive: false });
   document.addEventListener('pointerdown', () => Sfx.unlock());
 
-  // anciens bonus d'Entraînement retirés (dégâts → établis, relances → plus de choix de fin de vague) : remboursés
+  // l'Entraînement a été retiré : tout ce qui y avait été acheté est remboursé dans la réserve
   const OLD_PERM = { dmg: l => 80 + l * 80, reroll: l => 120 + l * 120 };
+  for (const it of SHOP) OLD_PERM[it.id] = it.cost;
   let refund = 0;
-  for (const [id, cost] of Object.entries(OLD_PERM)) { const l = Save.data.perm[id] || 0; for (let i = 0; i < l; i++) refund += cost(i); delete Save.data.perm[id]; }
-  if (refund) { Save.data.bank += refund; Save.save(); setTimeout(() => UI.toast(`🔩 +${refund} remboursés`, 'Les dégâts s\'améliorent maintenant aux établis, pendant la partie'), 800); }
-
+  for (const [id, lv] of Object.entries(Save.data.perm || {})) { const cost = OLD_PERM[id]; if (cost) for (let i = 0; i < lv; i++) refund += cost(i); }
+  Save.data.perm = {};
+  if (refund) { Save.data.bank += refund; Save.save(); setTimeout(() => UI.toast(`🔩 +${refund} remboursés`, 'L\'Entraînement est retiré : votre réserve vous est rendue'), 800); }
   const loading = document.getElementById('loading');
   if (loading) loading.remove();
   Game.toMenu();

@@ -535,6 +535,95 @@ function applyGunMods(gun, mods = {}) {
   u.box = bx;
 }
 
+/** Armes secondaires (pistolets, js/loadout.js SECONDARIES) : petits modèles sans pièces d'établi.
+    Matériaux du fusil (M) : la peinture du Garage s'applique aussi. Repère : canon vers +z. */
+function buildSidearm(id, M) {
+  const gun = new THREE.Group(), a = gacc(), u = gun.userData = { id: 'sec_' + id, M, slots: {}, anchors: {} };
+  if (id === 'revolver') {
+    cyl(gun, 0.55, 0.55, 8, M.metal, 0, 0.9, 5, PI2, 0, 0, 10);          // long canon
+    box(gun, 0.8, 0.5, 7, M.metal, 0, 1.55, 4.6);                         // nervure
+    cyl(gun, 1.25, 1.25, 2.4, a.dark, 0, 0.6, 0.4, PI2, 0, 0, 6);         // barillet
+    box(gun, 1.4, 1.8, 2.2, M.metal, 0, 0.5, -1.4);
+    box(gun, 1.3, 3.4, 1.8, M.wood, 0, -1.6, -2.4, -0.45);                // crosse en bois
+    box(gun, 0.4, 0.9, 0.5, a.dark, 0, 1.8, -2.2, 0.5);                   // chien
+    u.mz = 9; u.my = 0.9;
+  } else if (id === 'mpistol') {
+    box(gun, 1.6, 2, 7, M.metal, 0, 0.6, 1.8);
+    cyl(gun, 0.45, 0.45, 2.4, a.dark, 0, 0.8, 6.3, PI2, 0, 0, 8);
+    box(gun, 1.3, 3, 1.6, M.wood, 0, -1.6, -0.6, -0.2);                   // poignée
+    box(gun, 1.1, 4.4, 1.3, M.metal, 0, -1.6, 2.6, 0.1);                  // long chargeur devant la détente
+    box(gun, 0.4, 0.4, 3.2, M.metal, 0, 0.2, -3);                         // crosse repliable
+    box(gun, 0.4, 1.6, 0.4, M.metal, 0, -0.4, -4.5);
+    u.mz = 7.5; u.my = 0.8;
+  } else if (id === 'flaregun') {
+    cyl(gun, 1.2, 1.1, 6.5, a.shell, 0, 0.8, 3.6, PI2, 0, 0, 12);         // gros canon orange
+    cyl(gun, 0.85, 0.85, 0.15, a.dark, 0, 0.8, 6.9, PI2, 0, 0, 12);
+    box(gun, 1.6, 2, 2.8, a.shell, 0, 0.5, -0.4);
+    box(gun, 1.4, 3.4, 1.8, a.shell, 0, -1.6, -1.4, -0.3);
+    box(gun, 0.4, 1, 0.5, a.dark, 0, 1.7, -1.2, 0.4);
+    u.mz = 7; u.my = 0.8;
+  } else { // pistolet
+    box(gun, 1.5, 1.7, 6.5, M.metal, 0, 0.7, 1.6);                        // culasse
+    box(gun, 1.3, 0.9, 5.5, a.dark, 0, -0.35, 1.9);                       // carcasse
+    box(gun, 1.3, 3.4, 1.8, M.wood, 0, -1.8, -0.9, -0.25);                // poignée
+    box(gun, 0.3, 0.45, 0.3, a.dark, 0, 1.75, 4.5);                       // guidon
+    u.mz = 5; u.my = 0.7;
+  }
+  u.flash = mesh(G.sphere(id === 'flaregun' ? 1.8 : 1.1, 10, 8), glowMat(id === 'flaregun' ? '#ff5a2a' : '#ffd27a', 4), false);
+  u.flash.position.set(0, u.my, u.mz + 1.1); u.flash.visible = false; gun.add(u.flash);
+  return gun;
+}
+
+/* =====================================================================
+   HORDES SUR LA CARTE GRAPHIQUE (animation précalculée, « vertex animation texture »)
+   Au chargement, les animations du zombie (marche, course, reptation, coup, attente, mort) sont
+   calculées une fois pour toutes : la position et la normale de chaque sommet, image par image,
+   rangées dans deux textures (largeur = nombre de sommets, hauteur = nombre d'images).
+   Ensuite, toute la horde « ordinaire » (rôdeurs, coureurs, rampants, hors élites) est dessinée
+   en UN seul appel (InstancedMesh) : chaque zombie n'est plus qu'une matrice + un numéro d'image,
+   sans squelette à recalculer. Les zombies à accessoires, les élites et les boss gardent le modèle animé classique.
+   ===================================================================== */
+const VAT_KINDS = { walker: 1, runner: 1, crawler: 1 };
+const VAT_FPS = 24;
+function bakeVAT(asset, names) {
+  const root = SkeletonUtils.clone(asset.scene);
+  let sm = null; root.traverse(o => { if (o.isSkinnedMesh && !sm) sm = o; });
+  if (!sm) return null;
+  root.updateMatrixWorld(true);
+  const geo = sm.geometry, N = geo.attributes.position.count, P = geo.attributes.position.array, NO = geo.attributes.normal.array;
+  const SI = geo.attributes.skinIndex, SW = geo.attributes.skinWeight, wI = new Uint16Array(N * 4), wW = new Float32Array(N * 4);
+  for (let i = 0; i < N; i++) { wI[i * 4] = SI.getX(i); wI[i * 4 + 1] = SI.getY(i); wI[i * 4 + 2] = SI.getZ(i); wI[i * 4 + 3] = SI.getW(i); wW[i * 4] = SW.getX(i); wW[i * 4 + 1] = SW.getY(i); wW[i * 4 + 2] = SW.getZ(i); wW[i * 4 + 3] = SW.getW(i); }
+  const clips = {}; let total = 0;
+  for (const n of names) { const c = asset.clips[n]; if (!c) continue; const fr = Math.max(2, Math.round(c.duration * VAT_FPS)); clips[n] = { start: total, n: fr, dur: c.duration }; total += fr; }
+  const pos = new Float32Array(N * total * 4), nor = new Float32Array(N * total * 4);
+  const B = sm.skeleton.bones.length, M = new Float32Array(B * 16), tmp = new THREE.Matrix4(), mixer = new THREE.AnimationMixer(root);
+  for (const [n, C] of Object.entries(clips)) {
+    mixer.stopAllAction(); const action = mixer.clipAction(asset.clips[n]); action.reset(); action.play();
+    for (let f = 0; f < C.n; f++) {
+      mixer.setTime(f / C.n * C.dur);
+      root.updateMatrixWorld(true); sm.skeleton.update();
+      const bm = sm.skeleton.boneMatrices;
+      for (let b = 0; b < B; b++) { tmp.fromArray(bm, b * 16).premultiply(sm.bindMatrixInverse).multiply(sm.bindMatrix); tmp.toArray(M, b * 16); }
+      const row = (C.start + f) * N * 4;
+      for (let i = 0; i < N; i++) {
+        let a0 = 0, a1 = 0, a2 = 0, a4 = 0, a5 = 0, a6 = 0, a8 = 0, a9 = 0, a10 = 0, a12 = 0, a13 = 0, a14 = 0;
+        for (let k = 0; k < 4; k++) {
+          const w = wW[i * 4 + k]; if (!w) continue;
+          const o = wI[i * 4 + k] * 16;
+          a0 += w * M[o]; a1 += w * M[o + 1]; a2 += w * M[o + 2]; a4 += w * M[o + 4]; a5 += w * M[o + 5]; a6 += w * M[o + 6];
+          a8 += w * M[o + 8]; a9 += w * M[o + 9]; a10 += w * M[o + 10]; a12 += w * M[o + 12]; a13 += w * M[o + 13]; a14 += w * M[o + 14];
+        }
+        const x = P[i * 3], y = P[i * 3 + 1], z = P[i * 3 + 2], nx = NO[i * 3], ny = NO[i * 3 + 1], nz = NO[i * 3 + 2], j = row + i * 4;
+        pos[j] = a0 * x + a4 * y + a8 * z + a12; pos[j + 1] = a1 * x + a5 * y + a9 * z + a13; pos[j + 2] = a2 * x + a6 * y + a10 * z + a14;
+        const qx = a0 * nx + a4 * ny + a8 * nz, qy = a1 * nx + a5 * ny + a9 * nz, qz = a2 * nx + a6 * ny + a10 * nz, l = Math.hypot(qx, qy, qz) || 1;
+        nor[j] = qx / l; nor[j + 1] = qy / l; nor[j + 2] = qz / l;
+      }
+    }
+  }
+  mixer.stopAllAction();
+  return { clips, total, N, pos, nor, geometry: geo, material: sm.material, meshMatrix: sm.matrixWorld.clone() };
+}
+
 /** Variantes de zombies : hauteur (unités monde), teinte, vitesse d'anim, accessoires */
 const ZOMBIE_TYPES = {
   walker:   { h: 50, tint: '#ffffff', walk: 'Walk', speed: 1.0 },
@@ -548,6 +637,9 @@ const ZOMBIE_TYPES = {
   queen:    { h: 128, tint: '#b89ad8', walk: 'Walk', speed: 0.6, glow: '#7a2aff' },
   charger:  { h: 136, tint: '#a8805a', walk: 'Walk', speed: 0.55, glow: '#ff5a1a' },
   spewer:   { h: 124, tint: '#c8d860', walk: 'Walk', speed: 0.5, glow: '#9aff2a' },
+  climber:  { h: 46, tint: '#a8b8c8', walk: 'Run', speed: 1.15 },
+  burner:   { h: 118, tint: '#e0905a', walk: 'Walk', speed: 0.6, glow: '#ff6a10' },
+  abomination: { h: 168, tint: '#9a7aaa', walk: 'Walk', speed: 0.45, glow: '#c83aff' },
   howler:   { h: 54, tint: '#c8a8e8', walk: 'Walk', speed: 0.95 },
   shield:   { h: 56, tint: '#a8aa98', walk: 'Walk', speed: 0.7 },
   burrower: { h: 46, tint: '#d8b080', walk: 'Run', speed: 1.1 },
@@ -618,6 +710,21 @@ function makeZombie(kind, elite) {
     const glass = mesh(G.box(14, 6, 2.2), new THREE.MeshStandardMaterial({ color: '#6a8aa8', roughness: 0.1, metalness: 0.4, transparent: true, opacity: 0.7 })); glass.position.y = 9;
     const txt = mesh(G.box(16, 3, 2.3), mat('#e8e8e8', { r: 0.6 })); txt.position.y = -2;
     sh.add(plate, glass, txt); sh.position.set(0, 20, 13); a.root.add(sh); a.shieldObj = sh;
+  }
+  if (kind === 'burner') { // deux réservoirs de carburant sur le dos + masque à gaz
+    const pack = new THREE.Group(), tankM = mat('#8a2a1a', { r: 0.4, m: 0.5 }), dark = mat('#1e1c1a', { r: 0.5, m: 0.5 });
+    for (const s of [-1, 1]) { const tk = mesh(G.cyl(3.2, 3.2, 14, 12), tankM); tk.position.set(s * 3.6, 0, 0); pack.add(tk); const cap = mesh(G.cyl(1.4, 1.4, 1.6, 8), dark); cap.position.set(s * 3.6, 7.6, 0); pack.add(cap); }
+    const flame = mesh(G.sphere(2.4, 8, 6), glowMat('#ff7a1a', 5), false); flame.position.set(0, 9, 0); pack.add(flame);
+    pack.position.set(0, 4, -7); attachToBone(a, 'Torso', pack) || a.root.add(pack);
+    const mask = mesh(G.box(6, 5, 3), dark); mask.position.set(0, 0, 5); attachToBone(a, 'Head', mask);
+  }
+  if (kind === 'abomination') { // excroissances violettes lumineuses sur le dos et les épaules
+    const glow = glowMat('#c83aff', 1.6), flesh = mat('#5a3a5a', { r: 0.8 });
+    for (let i = 0; i < 6; i++) { const b = mesh(G.sphere(3 + (i % 3) * 1.6, 10, 8), i % 2 ? glow : flesh, false); const an = i / 6 * Math.PI - Math.PI / 2; b.position.set(Math.sin(an) * 7, 2 + Math.cos(an) * 3, -5); attachToBone(a, 'Torso', b) || a.root.add(b); }
+  }
+  if (kind === 'climber') { // capuche sombre et longs bras griffus
+    const hood = mesh(G.hemi(7), mat('#2a3038', { r: 0.9 })); hood.position.set(0, 7, -1); attachToBone(a, 'Head', hood);
+    for (const m of a.mats) m.color.lerp(new THREE.Color('#5a6a7a'), 0.25);
   }
   if (kind === 'burrower') { // couvert de sable, griffes
     for (const m of a.mats) m.color.lerp(new THREE.Color('#c8a070'), 0.35);
@@ -1405,7 +1512,7 @@ const Render = {
     // ombres de contact de tous les zombies : un seul objet instancié
     this.contactIM = new THREE.InstancedMesh(this.contactGeo, this.contactMat, 200); this.contactIM.count = 0; this.contactIM.frustumCulled = false; this.contactIM.renderOrder = 1; this.scene.add(this.contactIM);
     // pools d'objets réutilisés
-    this.pools = { tracer: [], orb: [], nut: [], warn: [], barrel: [], grenade: [], mine: [], drone: [], fire: [], medkit: [], bomb: [], magnet: [], chest: [], frenzy: [], explosive: [], haste: [], ring: [], turret: [], trap: [], gascan: [], battery: [], gen: [], zone: [], crate: [], acid: [] };
+    this.pools = { tracer: [], orb: [], nut: [], warn: [], barrel: [], grenade: [], mine: [], drone: [], fire: [], medkit: [], bomb: [], magnet: [], chest: [], frenzy: [], explosive: [], haste: [], ring: [], turret: [], trap: [], gascan: [], battery: [], gen: [], zone: [], crate: [], acid: [], flare: [], crateCarry: [], fort_wood: [], fort_sand: [], fort_spikes: [], ghost_wood: [], ghost_sand: [], ghost_spikes: [] };
     // traces au sol (zombies abattus, explosions) : persistent puis s'estompent
     this.decals = [];
     this.splatTex = canvasTex(128, (x, S) => {
@@ -1510,6 +1617,7 @@ const Render = {
       a.gun = new THREE.Group(); a.root.add(a.gun);
       // armes modulaires (pièces de l'établi) ; matériaux partagés avec l'établi (peintures du Garage)
       a.guns = { rifle: buildGun('rifle', this.gunM.rifle), shotgun: buildGun('shotgun', this.gunM.shotgun), flamer: buildGun('flamer', this.gunM.flamer) };
+      for (const id of Object.keys(SECONDARIES)) a.guns['sec_' + id] = buildSidearm(id, this.gunM.rifle); // armes secondaires
       for (const gm of Object.values(a.guns)) { gm.visible = false; a.gun.add(gm); }
       a.guns.rifle.visible = true; a.gunId = 'rifle';
       a.gunMats = this.gunMatList; a.modSig = null;
@@ -1520,8 +1628,9 @@ const Render = {
     const a = this.player;
     if (a.cosV !== Cosmetics.version) { a.cosV = Cosmetics.version; this.applyOutfit(a); this.applyWeaponSkin(a); }
     // pièces achetées à l'établi : visibles sur l'arme tenue
-    const gm = p && g.gunMods, sig = gm ? JSON.stringify(gm) : '';
-    if (a.modSig !== sig) { a.modSig = sig; for (const [id, o] of Object.entries(a.guns)) applyGunMods(o, (gm && gm[id]) || {}); }
+    // (en menu : pièces de base de l'arme de la classe choisie, ex. lunette du fusil de précision)
+    const sig = JSON.stringify(p ? g.gunMods : null) + (p ? g.primary : Loadout.current().primary);
+    if (a.modSig !== sig) { a.modSig = sig; for (const [id, o] of Object.entries(a.guns)) if (GUN_PARTS[id]) applyGunMods(o, p ? Loadout.displayMods(g, id) : Loadout.displayMods(null, id)); }
     a.mixer.update(dt);
     if (!p && g.state === 'menu') { this.showcase(g, a, dt); return; }
     a.showing = false;
@@ -1544,7 +1653,8 @@ const Render = {
     a.face = lerpAngle(a.face, Math.atan2(Math.cos(p.aimAngle), Math.sin(p.aimAngle)), Math.min(1, dt * 16));
     a.root.rotation.y = a.face;
     const moving = Math.hypot(p.vx, p.vy) > 5;
-    const recoil = U.clamp(p.fireTimer * p.weapon.fireRate, 0, 1);
+    const sec = g.active === 'secondary' && g.secondary;
+    const recoil = g.swapT > 0 ? 0 : U.clamp(p.fireTimer * (sec && g._sw ? g._sw.fireRate : p.weapon.fireRate), 0, 1);
     const firing = g.enemies.length > 0 && recoil > 0.05;
     const runSpeed = Math.hypot(p.vx, p.vy) / 200;
     a.gun.visible = p.rollT <= 0;
@@ -1558,11 +1668,12 @@ const Render = {
       play(a, anim, { speed: U.clamp(runSpeed, 0.8, 1.6) });
     } else play(a, firing ? 'Idle_Gun_Shoot' : 'Idle_Gun');
     // arme équipée (fusil d'assaut / fusil à pompe / lance-flammes)
-    this.setGun(a, g.active || 'rifle');
+    this.setGun(a, sec ? 'sec_' + g.secondary : g.active || 'rifle');
     const fl = a.guns[a.gunId].userData.flash;
     fl.visible = a.gunId === 'flamer' ? recoil > 0.2 : recoil > 0.8;
     if (fl.visible) { const k = 0.7 + Math.random() * 0.6; fl.scale.set(k, k, k * 2.2); }
     this.holdGun(a, recoil);
+    if (g.swapT > 0) a.gun.position.y -= Math.sin(g.swapT / 0.3 * Math.PI) * 6; // changement d'arme : l'arme descend puis remonte
     const blink = p.invuln > 0 && Math.floor(p.invuln * 16) % 2 === 0;
     this.setFlash(a, blink ? 0.7 : 0, blink ? 0.1 : 0, blink ? 0.05 : 0);
   },
@@ -1579,8 +1690,9 @@ const Render = {
     a.face = -0.45 + Math.sin(g.time * 0.5) * 0.12;
     a.root.rotation.y = a.face;
     this.setFlash(a, 0, 0, 0);
-    this.setGun(a, 'rifle');
-    a.guns.rifle.userData.flash.visible = false;
+    const kind = PRIMARIES[Loadout.current().primary].kind; // arme de la classe choisie
+    this.setGun(a, kind);
+    a.guns[kind].userData.flash.visible = false;
     this.holdGun(a, 0);
   },
 
@@ -1730,11 +1842,85 @@ const Render = {
   },
   SHOW: { x: MAP.car.x + 58, y: MAP.car.y + 12 },
 
+  /** Prépare la horde instanciée (voir bakeVAT) ; null si la machine ne le permet pas (repli : modèles animés classiques) */
+  makeVat() {
+    const A = ASSETS.zombie, caps = this.renderer.capabilities;
+    if (!A || !caps.isWebGL2 || (Save.data.settings && Save.data.settings.vat === false)) return null;
+    const t0 = performance.now(), V = bakeVAT(A, ['Walk', 'Run', 'Crawl', 'Punch', 'Idle', 'Death']);
+    if (!V || V.N > caps.maxTextureSize || V.total > caps.maxTextureSize || !V.clips.Walk || !V.clips.Death) return null;
+    const tex = arr => { const t = new THREE.DataTexture(arr, V.N, V.total, THREE.RGBAFormat, THREE.FloatType); t.minFilter = t.magFilter = THREE.NearestFilter; t.generateMipmaps = false; t.needsUpdate = true; return t; };
+    const posTex = tex(V.pos), norTex = tex(V.nor), MAX = 320;
+    const geo = new THREE.BufferGeometry(); geo.setIndex(V.geometry.index);
+    for (const k of ['position', 'normal', 'uv']) if (V.geometry.attributes[k]) geo.setAttribute(k, V.geometry.attributes[k]);
+    const vatA = new THREE.InstancedBufferAttribute(new Float32Array(MAX * 4), 4); vatA.setUsage(THREE.DynamicDrawUsage); geo.setAttribute('vatA', vatA);
+    const m = V.material.clone(); m.emissive = new THREE.Color(0, 0, 0);
+    m.onBeforeCompile = sh => {
+      sh.uniforms.vatPos = { value: posTex }; sh.uniforms.vatNor = { value: norTex };
+      sh.vertexShader = 'attribute vec4 vatA;\nuniform highp sampler2D vatPos;\nuniform highp sampler2D vatNor;\nvarying float vFlash;\n' + sh.vertexShader
+        .replace('#include <beginnormal_vertex>', 'ivec2 vta = ivec2(gl_VertexID, int(vatA.x));\nivec2 vtb = ivec2(gl_VertexID, int(vatA.y));\nvec3 objectNormal = normalize(mix(texelFetch(vatNor, vta, 0).xyz, texelFetch(vatNor, vtb, 0).xyz, vatA.z));')
+        .replace('#include <begin_vertex>', 'vec3 transformed = mix(texelFetch(vatPos, vta, 0).xyz, texelFetch(vatPos, vtb, 0).xyz, vatA.z);\nvFlash = vatA.w;');
+      sh.fragmentShader = 'varying float vFlash;\n' + sh.fragmentShader.replace('#include <emissivemap_fragment>', '#include <emissivemap_fragment>\ntotalEmissiveRadiance += vec3(vFlash);');
+    };
+    m.customProgramCacheKey = () => 'zombie-vat';
+    const im = new THREE.InstancedMesh(geo, m, MAX);
+    im.frustumCulled = false; im.castShadow = false; im.receiveShadow = false;
+    im.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+    im.setColorAt(0, new THREE.Color(1, 1, 1)); im.instanceColor.setUsage(THREE.DynamicDrawUsage);
+    im.count = 0; this.scene.add(im);
+    const base = new THREE.Matrix4().makeTranslation(0, -A.minY, 0).multiply(V.meshMatrix);
+    return { im, vatA, clips: V.clips, base, MAX, live: new Map(), dying: [], h: A.height, bakeMs: Math.round(performance.now() - t0),
+      M: new THREE.Matrix4(), q: new THREE.Quaternion(), p: new THREE.Vector3(), s: new THREE.Vector3(), up: new THREE.Vector3(0, 1, 0), c: new THREE.Color() };
+  },
+  /** Écrit un zombie instancié : position, orientation, taille, image d'animation (interpolée), éclair d'impact, teinte */
+  vatWrite(V, i, x, y, z, yaw, k, sq, clip, t, loop, flash, color) {
+    const C = V.clips[clip] || V.clips.Walk;
+    let f = t / C.dur * C.n; f = loop ? ((f % C.n) + C.n) % C.n : Math.min(Math.max(f, 0), C.n - 1);
+    const fa = Math.floor(f), fb = loop ? (fa + 1) % C.n : Math.min(fa + 1, C.n - 1), a = V.vatA.array, j = i * 4;
+    a[j] = C.start + fa; a[j + 1] = C.start + fb; a[j + 2] = f - fa; a[j + 3] = flash;
+    V.q.setFromAxisAngle(V.up, yaw); V.p.set(x, y, z); V.s.set(k * sq, k * (2 - sq), k * sq);
+    V.M.compose(V.p, V.q, V.s).multiply(V.base);
+    V.im.setMatrixAt(i, V.M); V.im.setColorAt(i, color);
+  },
+  /** Un zombie de la horde instanciée : même choix d'animation que animateEnemy, sans squelette */
+  syncVatEnemy(V, e, g, dt, vi) {
+    const p = g.player, t = ZOMBIE_TYPES[e.def.model];
+    let st = e._vat;
+    if (!st) {
+      const tint = new THREE.Color(t.tint);
+      if (e.def.model === 'walker') tint.offsetHSL((Math.random() - 0.5) * 0.06, 0, (Math.random() - 0.5) * 0.12);
+      st = e._vat = { yaw: Math.atan2(p ? p.x - e.x : 0, p ? p.y - e.y : 1), t: Math.random() * 2, tint, k: t.h / V.h };
+      V.live.set(e, st);
+    }
+    st.seen = true; st.x = e.x; st.y = e.y;
+    const sp = Math.hypot(e.vx, e.vy), moving = sp > 4, near = p && Math.hypot(p.x - e.x, p.y - e.y) < e.r + p.r + 22;
+    const clip = near || e.bashing > 0 ? 'Punch' : moving ? t.walk : (t.idle || 'Idle');
+    const speed = near || e.bashing > 0 ? 1.3 : moving ? t.speed * U.clamp(sp / (e.def.speed || 60), 0.6, 1.6) : 1;
+    if (st.clip !== clip) { st.clip = clip; if (clip === 'Punch') st.t = 0; }
+    st.t += dt * speed;
+    const tx = moving ? e.vx : (p ? p.x - e.x : e.vx), tz = moving ? e.vy : (p ? p.y - e.y : e.vy);
+    st.yaw = lerpAngle(st.yaw, Math.atan2(tx, tz), Math.min(1, dt * 8));
+    const v = this._pv || (this._pv = new THREE.Vector3());
+    v.set(toX(e.x), t.h * 0.5, toZ(e.y)).project(this.camera);
+    if (!(v.x > -1.25 && v.x < 1.25 && v.y > -1.3 && v.y < 1.3) || vi >= V.MAX) return vi; // hors de l'écran : rien à dessiner
+    const rise = easeOut(e.age / 0.55);
+    this.vatWrite(V, vi, toX(e.x), (rise - 1) * t.h * 0.9, toZ(e.y), st.yaw, st.k, e.flash > 0 ? 1.07 : 1, clip, st.t, true, e.flash > 0 ? 0.8 : 0, st.tint);
+    return vi + 1;
+  },
+
   syncEnemies(g, dt) {
     const seen = new Set(), half = this.halfAnim && g.enemies.length > 20; let idx = 0, ci = 0;
     const cm = this.contactIM, CM = this._cmM || (this._cmM = new THREE.Matrix4());
     this.frameN = (this.frameN || 0) + 1;
+    if (this.vat === undefined) { try { this.vat = this.makeVat(); } catch (err) { console.warn('Horde instanciée indisponible', err); this.vat = null; } }
+    const V = this.vat; let vi = 0;
+    if (V) for (const st of V.live.values()) st.seen = false;
     for (const e of g.enemies) {
+      // horde instanciée (zombies ordinaires) : une matrice + une image d'animation, dessinés tous ensemble
+      if (V && (e._vat || (!e._m && VAT_KINDS[e.def.model] && !e.elite))) {
+        vi = this.syncVatEnemy(V, e, g, dt, vi);
+        if (ci < cm.instanceMatrix.count && e._vat) { const sz = e.r * 2; CM.makeScale(sz, 1, sz * 0.8).setPosition(toX(e.x), 0.8, toZ(e.y)); cm.setMatrixAt(ci++, CM); }
+        continue;
+      }
       let a = e._m;
       if (!a) {
         a = makeZombie(e.def.model, e.elite); // (ombre douce au sol : dessinée pour toute la horde en un seul appel, voir contactIM)
@@ -1757,6 +1943,16 @@ const Render = {
       this.animateEnemy(a, e, g, adt);
     }
     cm.count = ci; cm.instanceMatrix.needsUpdate = true;
+    if (V) { // horde instanciée : les zombies disparus jouent leur chute puis s'enfoncent dans le sable
+      for (const [e, st] of V.live) if (!st.seen) { V.live.delete(e); V.dying.push({ st, t: 0 }); }
+      for (let i = V.dying.length - 1; i >= 0; i--) {
+        const d = V.dying[i]; d.t += dt;
+        if (d.t > 2) { V.dying.splice(i, 1); continue; }
+        if (vi >= V.MAX) continue;
+        this.vatWrite(V, vi++, toX(d.st.x), d.t > 1.1 ? -(d.t - 1.1) * 40 : 0, toZ(d.st.y), d.st.yaw, d.st.k, 1, 'Death', d.t * 1.4, false, 0, d.st.tint);
+      }
+      V.im.count = vi; V.im.instanceMatrix.needsUpdate = true; V.im.instanceColor.needsUpdate = true; V.vatA.needsUpdate = true;
+    }
     // morts : animation de chute, puis ils s'enfoncent dans le sable
     for (const a of this.enemyModels) if (!seen.has(a)) {
       this.enemyModels.delete(a); a.dieT = 0; this.dying.push(a);
@@ -1784,7 +1980,9 @@ const Render = {
     a.root.rotation.y = lerpAngle(a.root.rotation.y, Math.atan2(tx, tz), Math.min(1, dt * 8));
     // sortie de terre
     const rise = easeOut(e.age / 0.55);
-    a.root.position.y = (rise - 1) * a.height * 0.9;
+    // grimpeur : monte sur les toits et les véhicules (bond rapide vers la hauteur du dessous)
+    if (e.def.climb) a.cy = (a.cy || 0) + ((e.climbH || 0) - (a.cy || 0)) * Math.min(1, dt * 10);
+    a.root.position.y = (rise - 1) * a.height * 0.9 + (a.cy || 0);
     // choix de l'animation
     const near = p && Math.hypot(p.x - e.x, p.y - e.y) < e.r + p.r + 22;
     if (a.kind === 'charger' && e.cstate === 'windup') play(a, 'Idle_Attack', { speed: 1.6 });
@@ -2089,9 +2287,54 @@ const Render = {
       for (const m of B.mats) { if (m.transparent !== tr) { m.transparent = tr; m.needsUpdate = true; } m.opacity = B.fade; m.depthWrite = !tr; }
     }
     // lampadaires allumés la nuit
-    for (const l of this.lamps) l.material.color.copy(col('#ffe2a0')).multiplyScalar(0.4 + this.env.night * 3);
+    for (const l of this.lamps) l.material.color.copy(col('#ffe2a0')).multiplyScalar((0.4 + this.env.night * 3) * (1 - 0.92 * (this.env.bo || 0))); // coupés pendant une panne
     this.syncDog(g, dt);
+    this.syncNpcs(g, dt);
     this.syncLife(g, dt);
+  },
+
+  /** Personnages non joueurs : survivant escorté, survivants qui appellent à l'aide, renforts armés */
+  syncNpcs(g, dt) {
+    const list = [], o = g.objective;
+    if (g.player) {
+      if (o && o.type === 'escort' && !o.failed) list.push(o.npc);
+      for (const s of g.rescues || []) list.push(s);
+      for (const h of g.helpers || []) list.push(h);
+    }
+    const seen = this._npcSeen || (this._npcSeen = new Set()); seen.clear();
+    const all = this.npcActors || (this.npcActors = new Set());
+    for (const n of list) {
+      let a = n._a;
+      if (!a || !all.has(a)) {
+        const ally = n.role === 'ally', asset = (ally ? ASSETS.swat : ASSETS.scout) || ASSETS.survivor;
+        a = n._a = makeActor(asset, ally ? 56 : 52, new THREE.Color(ally ? '#b8c8d8' : '#d8c8b0'));
+        if (ally) { a.gun = new THREE.Group(); const gm = buildGun('rifle', this.gunM.rifle); a.gun.add(gm); a.gunModel = gm; a.root.add(a.gun); }
+        this.addContact(a, 20); this.scene.add(a.root); a.face = 0; all.add(a);
+      }
+      seen.add(a);
+      a.root.visible = true;
+      a.root.position.set(toX(n.x), 0, toZ(n.y));
+      const sp = Math.hypot(n.vx || 0, n.vy || 0), has = nm => (a.actions[nm] ? nm : 'Idle_Gun');
+      if (n.role === 'ally') {
+        const firing = n.fire > 0;
+        a.face = lerpAngle(a.face, firing || sp < 5 ? Math.atan2(Math.cos(n.aim), Math.sin(n.aim)) : Math.atan2(n.vx, n.vy), Math.min(1, dt * 12));
+        play(a, sp > 5 ? has(firing ? 'Run_Shoot' : 'Run') : has(firing ? 'Idle_Gun_Shoot' : 'Idle_Gun'));
+        this.holdGun(a, firing ? 0.9 : 0);
+        a.gunModel.userData.flash.visible = firing;
+      } else if (n.role === 'sos') {
+        a.face = lerpAngle(a.face, g.player ? Math.atan2(g.player.x - n.x, g.player.y - n.y) : 0, Math.min(1, dt * 4));
+        play(a, has('Wave'));
+      } else {
+        if (sp > 5) a.face = lerpAngle(a.face, Math.atan2(n.vx, n.vy), Math.min(1, dt * 10));
+        else if (!n.follow) a.face = lerpAngle(a.face, Math.atan2(g.player.x - n.x, g.player.y - n.y), Math.min(1, dt * 3));
+        play(a, sp > 5 ? has('Run') : n.follow ? has('Idle') : has('Wave'), { speed: sp > 5 ? U.clamp(sp / 200, 0.8, 1.4) : 1 });
+      }
+      a.root.rotation.y = a.face;
+      const fl = n.flash > 0;
+      for (const m of a.mats) m.emissive.setRGB(fl ? 0.8 : 0, 0, 0);
+      a.mixer.update(dt);
+    }
+    for (const a of all) if (!seen.has(a)) { this.scene.remove(a.root); all.delete(a); }
   },
 
   /** Vie du décor : corbeaux qui tournoient, hélicoptère de passage */
@@ -2130,7 +2373,7 @@ const Render = {
 
   syncDog(g, dt) {
     const garageDog = UI.screen === 'lobby' && UI.tab === 'garage' && UI.garageCat === 'dog';
-    const menuDog = !g.player && g.state === 'menu' && (Save.data.perm.dog || garageDog);
+    const menuDog = !g.player && g.state === 'menu' && (dogLevel() || garageDog);
     const d = menuDog ? { x: this.SHOW.x - 4, y: this.SHOW.y + 34, vx: 0, vy: 0, biting: 0 } : g.dog;
     if (!d || !ASSETS.dog || (!g.player && !menuDog)) { if (this.dog) this.dog.root.visible = false; return; }
     if (menuDog && this.dog) this.dog.face = 0.5;
@@ -2165,20 +2408,7 @@ const Render = {
   /** Caisses de ravitaillement (parachute pendant la chute) et flaques acides */
   syncDrops(g) {
     for (const c of g.crates || []) {
-      const o = this.take('crate', () => {
-        const gr = new THREE.Group(), wood = mat('#8a6a3a', { r: 0.85 }), band = mat('#3a5a2a', { r: 0.7 });
-        const box2 = new THREE.Group(); gr.add(box2);
-        box2.add(mesh(G.box(20, 16, 20), wood)); for (const y of [-5, 5]) { const b = mesh(G.box(20.6, 2.5, 20.6), band); b.position.y = y; box2.add(b); }
-        const red = mesh(G.box(6, 6, 20.8), mat('#e8e4dc', { r: 0.7 })); box2.add(red); const cr = mesh(G.box(2, 6.2, 21), mat('#c8201a', { r: 0.6 })); box2.add(cr);
-        const chute = new THREE.Group(); gr.add(chute);
-        const canopy = mesh(new THREE.SphereGeometry(26, 14, 6, 0, TAU, 0, Math.PI / 2), mat('#e8a818', { r: 0.9 }), true); canopy.position.y = 60; chute.add(canopy);
-        const lineM = new THREE.LineBasicMaterial({ color: '#3a3026' });
-        for (const [x, z] of [[-18, -18], [18, -18], [-18, 18], [18, 18]]) chute.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(x, 60, z), new THREE.Vector3(x * 0.4, 8, z * 0.4)]), lineM));
-        const beam = new THREE.Mesh(G.cyl(6, 9, 140, 14), new THREE.MeshBasicMaterial({ color: new THREE.Color('#7dff6a').multiplyScalar(1.3), transparent: true, opacity: 0.2, depthWrite: false, blending: THREE.AdditiveBlending }));
-        beam.position.y = 70; gr.add(beam);
-        gr.userData = { box: box2, chute, beam };
-        return gr;
-      });
+      const o = this.take('crate', () => this.makeCrate());
       const u = o.userData, k = U.clamp(c.t / c.fall, 0, 1);
       o.position.set(toX(c.x), c.landed ? 0 : (1 - k) * 420, toZ(c.y));
       u.box.position.y = 8; u.box.rotation.y = g.time * (c.landed ? 0 : 0.6);
@@ -2189,8 +2419,52 @@ const Render = {
       const o = this.take('acid', () => new THREE.Mesh(new THREE.CircleGeometry(1, 28).rotateX(-Math.PI / 2), new THREE.MeshBasicMaterial({ color: new THREE.Color('#9aff2a').multiplyScalar(1.2), transparent: true, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -2 })));
       o.position.set(toX(a.x), 0.7, toZ(a.y));
       o.scale.setScalar(a.r * (0.8 + 0.08 * Math.sin(g.time * 6 + a.x)) * Math.min(1, (a.max - a.t) * 4));
-      o.material.opacity = 0.45 * Math.min(1, a.t / 1.2);
+      o.material.opacity = (a.fire ? 0.6 : 0.45) * Math.min(1, a.t / 1.2);
+      if (o.userData.fire !== !!a.fire) { o.userData.fire = !!a.fire; o.material.color.set(a.fire ? '#ff6a10' : '#9aff2a').multiplyScalar(a.fire ? 1.6 : 1.2); } // brasier du Brûleur : orange
     }
+  },
+  /** Fortification (longueur selon x = FORTS[kind].w, épaisseur selon z) ; ghost : version translucide pour l'aperçu */
+  makeFort(kind, ghost) {
+    const F = FORTS[kind], gr = new THREE.Group(), L = F.w, D = F.d;
+    if (!this.ghostMat) this.ghostMat = new THREE.MeshBasicMaterial({ color: '#7dff6a', transparent: true, opacity: 0.5, depthWrite: false });
+    const wood = mat('#8a5a2e', { r: 0.85 }), dark = mat('#5a3a1e', { r: 0.9 }), sand = mat('#c8a46a', { r: 0.95 }), sand2 = mat('#b08a52', { r: 0.95 }), metal = mat('#6a6a6a', { r: 0.4, m: 0.7 });
+    if (kind === 'wood') { // poteaux + planches clouées en travers
+      for (const x of [-L / 2 + 4, L / 2 - 4]) box(gr, 5, 30, 5, dark, x, 15, 0);
+      for (const [y, r] of [[8, 0.08], [17, -0.06], [26, 0.05]]) box(gr, L, 6, 3.5, wood, 0, y, (y % 2 ? 1 : -1) * 1.5, 0, 0, r);
+      box(gr, L * 0.9, 4, 3, wood, 0, 16, -3, 0, 0, 0.5); box(gr, L * 0.9, 4, 3, wood, 0, 16, 3, 0, 0, -0.5);
+      for (let i = 0; i < 4; i++) box(gr, 1.2, 1.2, 1.2, metal, -L / 2 + 10 + i * 14, 17, 3.6);
+    } else if (kind === 'sand') { // sacs empilés en quinconce
+      const n = 5, bw = L / n;
+      for (let row = 0; row < 3; row++) for (let i = 0; i < n - (row % 2); i++) {
+        const x = -L / 2 + bw / 2 + i * bw + (row % 2 ? bw / 2 : 0);
+        const b = box(gr, bw - 1.2, 7, D - 2 - row * 2, (i + row) % 2 ? sand : sand2, x, 3.5 + row * 6.6, 0);
+        b.scale.set(1, 1, 1); b.rotation.y = ((i * 7 + row * 3) % 5 - 2) * 0.03;
+      }
+    } else { // pieux de bois taillés, plantés en biais vers l'extérieur
+      for (let i = 0; i < 7; i++) for (const s of [-1, 1]) {
+        const st = cyl(gr, 0.4, 1.6, 22, i % 2 ? wood : dark, -L / 2 + 5 + i * (L - 10) / 6, 8, s * D * 0.25, s * 0.7, 0, 0, 6);
+        st.rotation.x = s * 0.7;
+      }
+      box(gr, L, 2, 3, dark, 0, 3, 0);
+    }
+    if (ghost) gr.traverse(o => { if (o.isMesh) { o.material = this.ghostMat; o.castShadow = false; } });
+    return gr;
+  },
+
+  /** Caisse de ravitaillement avec parachute et faisceau (aussi le colis largué de l'objectif) */
+  makeCrate() {
+    const gr = new THREE.Group(), wood = mat('#8a6a3a', { r: 0.85 }), band = mat('#3a5a2a', { r: 0.7 });
+    const box2 = new THREE.Group(); gr.add(box2);
+    box2.add(mesh(G.box(20, 16, 20), wood)); for (const y of [-5, 5]) { const b = mesh(G.box(20.6, 2.5, 20.6), band); b.position.y = y; box2.add(b); }
+    const red = mesh(G.box(6, 6, 20.8), mat('#e8e4dc', { r: 0.7 })); box2.add(red); const cr = mesh(G.box(2, 6.2, 21), mat('#c8201a', { r: 0.6 })); box2.add(cr);
+    const chute = new THREE.Group(); gr.add(chute);
+    const canopy = mesh(new THREE.SphereGeometry(26, 14, 6, 0, TAU, 0, Math.PI / 2), mat('#e8a818', { r: 0.9 }), true); canopy.position.y = 60; chute.add(canopy);
+    const lineM = new THREE.LineBasicMaterial({ color: '#3a3026' });
+    for (const [x, z] of [[-18, -18], [18, -18], [-18, 18], [18, 18]]) chute.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(x, 60, z), new THREE.Vector3(x * 0.4, 8, z * 0.4)]), lineM));
+    const beam = new THREE.Mesh(G.cyl(6, 9, 140, 14), new THREE.MeshBasicMaterial({ color: new THREE.Color('#7dff6a').multiplyScalar(1.3), transparent: true, opacity: 0.2, depthWrite: false, blending: THREE.AdditiveBlending }));
+    beam.position.y = 70; gr.add(beam);
+    gr.userData = { box: box2, chute, beam };
+    return gr;
   },
 
   /** Objets d'objectif, tourelles, barbelés */
@@ -2213,6 +2487,21 @@ const Render = {
       o.userData.fl.visible = tu.fire > 0;
       o.scale.setScalar(tu.t < 3 && Math.floor(tu.t * 8) % 2 ? 0.92 : 1);
     }
+    // fortifications (forts.js) : elles s'affaissent en perdant leurs PV, tremblent quand on les frappe
+    for (const f of g.forts || []) {
+      const o = this.take('fort_' + f.kind, () => this.makeFort(f.kind)), F = FORTS[f.kind], vert = f.hw * 2 < F.w - 1;
+      const k = U.clamp(f.hp / f.max, 0, 1), sh = f.flash > 0 ? (Math.random() - 0.5) * 2 : 0;
+      o.position.set(toX(f.x) + sh, 0, toZ(f.y) + sh); o.rotation.y = vert ? Math.PI / 2 : 0;
+      o.scale.set(1, F.solid ? 0.55 + 0.45 * k : 1, 1);
+    }
+    // aperçu de la fortification à poser (vert : possible, rouge : impossible)
+    const B = g.build;
+    if (B && B.on && B.ghost) {
+      const gh = B.ghost, F = FORTS[gh.kind], o = this.take('ghost_' + gh.kind, () => this.makeFort(gh.kind, true));
+      o.position.set(toX(gh.x), 0.5, toZ(gh.y)); o.rotation.y = gh.hw * 2 < F.w - 1 ? Math.PI / 2 : 0;
+      this.ghostMat.color.set(gh.ok && g.coins >= Forts.cost(g, gh.kind) ? '#7dff6a' : '#ff4a3a');
+      this.ghostMat.opacity = 0.45 + 0.15 * Math.sin(g.time * 6);
+    }
     for (const tr of g.traps || []) {
       const o = this.take('trap', () => {
         const gr = new THREE.Group(), wire = mat('#6a6a6a', { r: 0.35, m: 0.8 });
@@ -2225,12 +2514,43 @@ const Render = {
     }
     const ob = g.objective;
     if (!ob) return;
+    if (ob.type === 'fetch' && ob.item.kind === 'airdrop' && !ob.item.carried) {
+      // colis largué : même caisse que les ravitaillements, avec un faisceau jaune
+      const it = ob.item, o = this.take('crate', () => this.makeCrate()), u = o.userData, k = U.clamp(it.t / it.fall, 0, 1);
+      o.position.set(toX(it.x), it.landed ? 0 : (1 - k) * 420, toZ(it.y));
+      u.box.position.y = 8; u.box.rotation.y = it.landed ? 0 : g.time * 0.6;
+      u.chute.visible = !it.landed; u.beam.visible = true; u.chute.rotation.z = Math.sin(g.time * 2) * 0.08;
+      return;
+    }
+    if (ob.type === 'flares') {
+      for (const f of ob.flares) {
+        const o = this.take('flare', () => {
+          const gr = new THREE.Group();
+          const stick = mesh(G.cyl(1.6, 1.8, 16, 8), mat('#c8201a', { r: 0.6 })); stick.position.y = 8; gr.add(stick);
+          const cap = mesh(G.cyl(1.9, 1.9, 2, 8), mat('#e8e4dc', { r: 0.7 })); cap.position.y = 16; gr.add(cap);
+          const fire = mesh(G.sphere(3.2, 10, 8), glowMat('#ff3a2a', 6), false); fire.position.y = 19; gr.add(fire);
+          const halo = new THREE.Mesh(new THREE.RingGeometry(0.85, 1, 32).rotateX(-Math.PI / 2), new THREE.MeshBasicMaterial({ color: new THREE.Color('#ff6a3a').multiplyScalar(1.8), transparent: true, opacity: 0.8, depthWrite: false }));
+          halo.position.y = 0.9; gr.add(halo);
+          const beam = new THREE.Mesh(G.cyl(4, 7, 180, 12), new THREE.MeshBasicMaterial({ color: new THREE.Color('#ff3a2a').multiplyScalar(1.4), transparent: true, opacity: 0.22, depthWrite: false, blending: THREE.AdditiveBlending }));
+          beam.position.y = 90; gr.add(beam);
+          gr.userData = { fire, halo, beam };
+          return gr;
+        });
+        const u = o.userData;
+        o.position.set(toX(f.x), 0, toZ(f.y));
+        u.fire.visible = f.lit; u.beam.visible = f.lit; u.halo.visible = !f.lit;
+        if (f.lit) u.fire.scale.setScalar(0.8 + Math.random() * 0.5);
+        else u.halo.scale.setScalar(50 * (0.4 + 0.6 * f.prog / ob.time) + Math.sin(g.time * 5) * 2);
+      }
+      return;
+    }
     if (ob.type === 'fetch') {
       const it = ob.item;
-      const o = this.take(it.kind, () => {
+      const o = this.take(it.kind === 'airdrop' ? 'crateCarry' : it.kind, () => {
         const gr = new THREE.Group();
         const model = it.kind === 'gascan' ? placeModel('gascan', 14, 6, 18, null) : null;
         if (model) gr.add(model);
+        else if (it.kind === 'airdrop') { const b = mesh(G.box(16, 12, 16), mat('#8a6a3a', { r: 0.85 })); b.position.y = 6; gr.add(b); const s = mesh(G.box(16.6, 2.4, 16.6), mat('#3a5a2a', { r: 0.7 })); s.position.y = 6; gr.add(s); }
         else { const box = mesh(G.box(16, 11, 10), mat('#2a2d32', { r: 0.4, m: 0.4 })); box.position.y = 5.5; gr.add(box); for (const x of [-4, 4]) { const tm = mesh(G.cyl(1.4, 1.4, 3, 8), mat(x < 0 ? '#d8282a' : '#e8e8e8', { m: 0.5 })); tm.position.set(x, 12, 0); gr.add(tm); } const lbl = mesh(G.box(16.4, 4, 10.4), mat('#ffc21a')); lbl.position.y = 5; gr.add(lbl); }
         const beam = new THREE.Mesh(G.cyl(5, 8, 160, 16), new THREE.MeshBasicMaterial({ color: new THREE.Color('#ffc21a').multiplyScalar(1.4), transparent: true, opacity: 0.22, depthWrite: false, blending: THREE.AdditiveBlending }));
         beam.position.y = 80; gr.add(beam);
@@ -2299,7 +2619,10 @@ const Render = {
     this.renderer.toneMappingExposure = 1.05 + n * 0.25;
     // lampe torche dans la direction du tir
     const p = g.player;
-    this.torch.intensity = n * 5.5; this.aura.intensity = n * 1.6;
+    // panne de courant (vague spéciale) : lampe torche presque éteinte, lampadaires coupés, nuit plus noire
+    E.bo = (E.bo || 0) + ((g.blackout && g.state !== 'menu' ? 1 : 0) - (E.bo || 0)) * Math.min(1, dt * 1.5);
+    this.hemi.intensity *= 1 - 0.45 * E.bo;
+    this.torch.intensity = n * 5.5 * (1 - 0.8 * E.bo); this.aura.intensity = n * 1.6 * (1 - 0.35 * E.bo);
     if (p && n > 0.01) {
       const vis = !p.inside && g.showPlayer !== false;
       this.torch.visible = this.aura.visible = vis;
@@ -2455,8 +2778,8 @@ const Render = {
     let gun = this.gsGuns[id];
     if (!gun) { gun = this.gsGuns[id] = buildGun(id, this.gunM[id]); this.gsPivot.add(gun); }
     for (const [k, o] of Object.entries(this.gsGuns)) o.visible = k === id;
-    const sig = JSON.stringify(g.gunMods[id] || {});
-    if (gun.userData.sig !== sig) { gun.userData.sig = sig; applyGunMods(gun, g.gunMods[id] || {}); }
+    const shown = Loadout.displayMods(g, id), sig = JSON.stringify(shown);
+    if (gun.userData.sig !== sig) { gun.userData.sig = sig; applyGunMods(gun, shown); }
     // peinture : survol > aperçu choisi > peinture équipée
     const hv = gs.hover && gs.hover.startsWith('skin:') ? gs.hover.slice(5) : null;
     const skinId = gs.tab === 'paint' ? (hv || gs.skin || Cosmetics.eq('weapon').id) : Cosmetics.eq('weapon').id;
@@ -2502,7 +2825,7 @@ const Render = {
   drawGunsmithLabels(c, g) {
     const gs = g.gs, gun = this.gsGuns && this.gsGuns[gs.gun];
     if (!gun || gs.tab !== 'parts') return;
-    const u = gun.userData, v = new THREE.Vector3(), roman = ['', ' I', ' II', ' III'];
+    const u = gun.userData, v = new THREE.Vector3(), roman = ['', ' I', ' II', ' III', ' IV'];
     const panel = document.querySelector('.panel.gunsmith'), right = panel ? panel.getBoundingClientRect().left - 8 : this.vw;
     const placed = []; // étiquettes déjà posées (pour éviter qu'elles se chevauchent)
     GUN_PARTS[gs.gun].parts.forEach((pt, i) => {
@@ -2676,10 +2999,26 @@ const Render = {
     }
     list.sort((a, b) => (b.boss - a.boss) || a.d - b.d);
     list.length = Math.min(list.length, 12);
-    const o = g.objective, op = o && (o.type === 'fetch' ? (o.item.carried ? MAP.car : o.item) : o.gen || o.at);
-    if (op && !(o.type === 'defend' && o.failed)) {
+    const op = Story.objPoint(g);
+    if (op) {
       const [sx, sy] = this.project(op.x, op.y, 10);
       if (!(sx > m && sx < this.vw - m && sy > top && sy < bot)) list.push({ sx, sy, obj: true, d: Math.hypot(op.x - p.x, op.y - p.y) });
+    }
+    for (const s of g.rescues || []) { // survivants qui appellent à l'aide : flèche bleue
+      const [sx, sy] = this.project(s.x, s.y, 10);
+      if (!(sx > m && sx < this.vw - m && sy > top && sy < bot)) list.push({ sx, sy, obj: true, sos: true, d: Math.hypot(s.x - p.x, s.y - p.y) });
+    }
+    // tutoriel : flèche jaune vers l'endroit où aller (établi, refuge, fût…), repère au-dessus quand il est à l'écran
+    const tp = g.tut && !p.inside && Tutorial.target(g);
+    if (tp) {
+      const [sx, sy] = this.project(tp.x, tp.y, 10);
+      if (!(sx > m && sx < this.vw - m && sy > top && sy < bot)) list.push({ sx, sy, obj: true, d: Math.hypot(tp.x - p.x, tp.y - p.y) });
+      else {
+        const [tx, ty] = this.project(tp.x, tp.y, tp.h || 40), bob = Math.sin(g.time * 6) * 5 * u;
+        c.textAlign = 'center'; c.textBaseline = 'middle';
+        this.label(c, '▼', tx, ty - 10 * u + bob, 22 * u, '#ffc21a');
+        if (tp.label) this.label(c, tp.label, tx, ty - 30 * u + bob, 12 * u, '#ffe08a', FONT_UI, 0.22);
+      }
     }
     for (const it of list) {
       const dx = it.sx - cx, dy = it.sy - cy;
@@ -2691,7 +3030,7 @@ const Render = {
       c.save(); c.translate(x, y); c.rotate(a);
       c.globalAlpha = it.obj ? 0.8 + 0.2 * Math.sin(g.time * 6) : it.warn ? 0.55 + 0.45 * Math.sin(g.time * 12) : 0.55 + near * 0.45;
       c.beginPath(); c.moveTo(sz, 0); c.lineTo(-sz * 0.7, -sz * 0.75); c.lineTo(-sz * 0.35, 0); c.lineTo(-sz * 0.7, sz * 0.75); c.closePath();
-      c.fillStyle = it.obj ? '#ffc21a' : it.boss ? '#ff5a1a' : '#ff3a2a'; c.fill();
+      c.fillStyle = it.sos ? '#3ad6ff' : it.obj ? '#ffc21a' : it.boss ? '#ff5a1a' : '#ff3a2a'; c.fill();
       c.lineWidth = 2; c.strokeStyle = 'rgba(10,8,6,0.9)'; c.stroke();
       c.restore();
       if (it.boss) { c.globalAlpha = 1; c.font = `${16 * u}px ${FONT_UI}`; c.textAlign = 'center'; c.textBaseline = 'middle'; c.fillText('💀', x - Math.cos(a) * 22 * u, y - Math.sin(a) * 22 * u); }
@@ -2756,6 +3095,17 @@ const Render = {
     }
     const o = g.objective;
     if (o && o.type === 'defend' && !o.failed) bar(o.gen.x, o.gen.y, 70, o.gen.hp / o.gen.max, '⚡ Générateur', o.gen.hp / o.gen.max > 0.4 ? '#7dff6a' : '#ff6a5a');
+    for (const f of g.forts || []) if (f.hp < f.max) bar(f.x, f.y, 34, f.hp / f.max, '', f.hp / f.max > 0.4 ? '#c8a070' : '#ff6a5a'); // fortifications abîmées
+    const B = g.build;
+    if (B && B.on && B.ghost) { const gh = B.ghost, [sx, sy] = this.project(gh.x, gh.y, 40); c.textAlign = 'center'; this.label(c, gh.ok ? `${FORTS[gh.kind].icon} ${Forts.cost(g, gh.kind)} 🔩` : '🚫 Pas ici', sx, sy, 12 * u, gh.ok ? '#c8ffb8' : '#ff8a7a', FONT_UI, 0.22); }
+    if (o && o.type === 'escort' && !o.failed) bar(o.npc.x, o.npc.y, 56, o.npc.hp / o.npc.max, o.npc.follow ? '🧑 Survivant' : '🧑 À escorter', o.npc.hp / o.npc.max > 0.4 ? '#7dff6a' : '#ff6a5a');
+    if (o && o.type === 'flares') for (const f of o.flares) {
+      if (f.lit) continue;
+      const [sx, sy] = this.project(f.x, f.y, 34); c.textAlign = 'center';
+      this.label(c, f.prog > 0 ? `${Math.floor(f.prog / o.time * 100)} %` : '🔥', sx, sy, 13 * u, '#ff8a5a', FONT_UI);
+    }
+    for (const s of g.rescues || []) { const [sx, sy] = this.project(s.x, s.y, 62); c.textAlign = 'center'; this.label(c, `🆘 ${Math.ceil(s.t)} s`, sx, sy, 13 * u, '#3ad6ff', FONT_UI); }
+    for (const h of g.helpers || []) { const [sx, sy] = this.project(h.x, h.y, 60); c.textAlign = 'center'; this.label(c, `${Math.ceil(h.t)} s`, sx, sy, 10 * u, '#8adcff', FONT_UI, 0.2); }
     if (o && o.at && o.type !== 'defend') { const [sx, sy] = this.project(o.at.x, o.at.y, 6); c.textAlign = 'center'; this.label(c, `${Math.floor(o.progress / o.time * 100)} %`, sx, sy, 14 * u, '#ffc21a'); }
   },
 
@@ -2765,8 +3115,11 @@ const Render = {
     let line1 = null, line2 = '';
     if (o) {
       line1 = `🎯 ${o.name}`;
-      if (o.type === 'fetch') line2 = o.item.carried ? '🚗 Rapportez-le à la voiture' : `📍 À ${Math.round(Math.hypot(o.item.x - g.player.x, o.item.y - g.player.y) / 10)} m`;
-      else if (o.type === 'defend') line2 = o.failed ? '❌ Détruit · nouvel essai à la prochaine vague' : `Tenez jusqu'à la fin de la vague · ${Math.ceil(o.gen.hp / o.gen.max * 100)} %`;
+      const far = q => `${Math.round(Math.hypot(q.x - g.player.x, q.y - g.player.y) / 10)} m`;
+      if (o.type === 'fetch') line2 = o.item.drop && !o.item.landed ? '🪂 Largage en cours…' : o.item.carried ? '🚗 Rapportez-le à la voiture' : `📍 À ${far(o.item)}${o.item.drop ? ' · la horde le garde' : ''}`;
+      else if (o.type === 'flares') { const lit = o.flares.filter(f => f.lit).length; line2 = `🔥 ${lit} / ${o.flares.length} allumées · ${g.phase === 'break' ? 'pendant la vague' : 'restez près d\'une fusée'}`; }
+      else if (o.type === 'escort') { const n = o.npc; line2 = o.failed ? '❌ Mort · un autre survivant à la prochaine vague' : !n.follow ? `📍 À ${far(n)} · ${g.phase === 'break' ? 'il sort pendant la vague' : 'rejoignez-le'}` : `❤️ ${Math.ceil(n.hp / n.max * 100)} % · ramenez-le à la voiture (${far(MAP.car)})`; }
+      else if (o.type === 'defend') line2 = o.failed ? '❌ Détruit · nouvel essai à la prochaine vague' : o.repairing ? `🔧 Réparation… ${Math.ceil(o.gen.hp / o.gen.max * 100)} %` : `Tenez jusqu'à la fin de la vague · ${Math.ceil(o.gen.hp / o.gen.max * 100)} % · restez à côté pour réparer`;
       else line2 = g.phase === 'break' ? 'Commence avec la vague' : `Restez dans le cercle · ${Math.ceil(Math.max(0, o.time - o.progress))} s`;
     } else if (g.phase === 'break') { line1 = `⏸ Pause · ${Math.ceil(g.breakT)} s`; line2 = 'Refuges ouverts · soignez-vous, équipez-vous'; }
     const parts = `🚗 Pièces ${g.parts || 0}/${OBJECTIVES.length}`;
@@ -2792,7 +3145,7 @@ const Render = {
       this.label(c, t1, x + 10 * u, cy2 + 12 * u, 11 * u, '#e8f8ff', FONT_UI, 0.2);
       this.label(c, t2, x + 10 * u, cy2 + 26 * u, 10.5 * u, ch.done ? '#7dff6a' : '#8adcff', FONT_UI, 0.2);
     }
-    if (g.night) { c.textAlign = 'left'; this.label(c, '🌙 Nuit', x + w + 8 * u, y + 12 * u, 11 * u, '#9ab8ff', FONT_UI, 0.2); }
+    if (g.night) { c.textAlign = 'left'; this.label(c, g.blackout ? '🔦 Panne' : '🌙 Nuit', x + w + 8 * u, y + 12 * u, 11 * u, '#9ab8ff', FONT_UI, 0.2); }
     const ms = Object.keys(g.mods || {}); // règles choisies
     if (ms.length) { c.textAlign = 'left'; this.label(c, `⚙️ ${RUN_MODS.filter(m => g.mods[m.id]).map(m => m.icon).join('')} +${Math.round((g.modBonus || 0) * 100)} %`, x + w + 8 * u, y + 44 * u, 11 * u, '#ffb070', FONT_UI, 0.2); }
     if (g.storm) { c.textAlign = 'left'; this.label(c, '🌪️ Tempête', x + w + 8 * u, y + (g.night ? 28 : 12) * u, 11 * u, '#ffb070', FONT_UI, 0.2); }
@@ -2829,7 +3182,9 @@ const Render = {
     for (const b2 of g.burrowers || []) { c.fillStyle = '#c8a070'; c.fillRect(x + b2.x * k - 1.2 * u, y + b2.y * k - 1.2 * u, 2.4 * u, 2.4 * u); } // enfouisseurs
     for (const cr of g.crates || []) { c.fillStyle = '#7dff6a'; c.fillRect(x + cr.x * k - 2.5 * u, y + cr.y * k - 2.5 * u, 5 * u, 5 * u); } // ravitaillement
     const o = g.objective;
-    const op = o && (o.type === 'fetch' ? (o.item.carried ? MAP.car : o.item) : o.gen || o.at);
+    const op = Story.objPoint(g);
+    for (const s of g.rescues || []) { c.beginPath(); c.arc(x + s.x * k, y + s.y * k, (3 + Math.sin(g.time * 8) * 1.2) * u, 0, TAU); c.fillStyle = '#3ad6ff'; c.fill(); c.strokeStyle = '#0c0a08'; c.stroke(); }
+    if (o && o.type === 'flares') for (const f of o.flares) if (f.lit) { c.fillStyle = '#ff3a2a'; c.fillRect(x + f.x * k - 2 * u, y + f.y * k - 2 * u, 4 * u, 4 * u); }
     if (op) { c.beginPath(); c.arc(x + op.x * k, y + op.y * k, (3 + Math.sin(g.time * 6) * 1.2) * u, 0, TAU); c.fillStyle = '#ffc21a'; c.fill(); c.strokeStyle = '#0c0a08'; c.stroke(); }
     const p = g.player;
     c.save(); c.translate(x + p.x * k, y + p.y * k); c.rotate(p.aimAngle);
@@ -2870,7 +3225,7 @@ const Render = {
     c.textAlign = 'center';
     this.label(c, `${Math.ceil(p.hp)} / ${Math.round(p.maxHp)}`, bx + bw / 2, by + bh / 2 + 0.5, 12 * u);
     c.textAlign = 'left';
-    this.label(c, `VAGUE ${g.wave.num}`, bx, by + bh + 13 * u, 13 * u, '#ffc21a');
+    this.label(c, g.tut ? 'TUTORIEL' : `VAGUE ${g.wave.num}`, bx, by + bh + 13 * u, 13 * u, '#ffc21a');
     c.textAlign = 'right';
     this.label(c, `🧟 ${g.wave.remaining}`, bx + bw, by + bh + 13 * u, 12 * u, '#e8e8e8', FONT_UI);
 

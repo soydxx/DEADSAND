@@ -4,24 +4,30 @@
    Près d'un établi, « Améliorer » met la partie en pause et ouvre l'armurier :
    l'arme tourne en 3D, chaque pièce achetée apparaît sur le modèle
    (lunette → portée, canon → cadence, chargeur → dégâts…).
-   Les pièces se paient avec la ferraille de la partie (3 niveaux par pièce).
+   Les pièces se paient avec la ferraille de la partie (3 niveaux par pièce, 4 pour la puissance).
+   Onglet « Équipement » : monter le létal et le tactique de la classe (niveaux 1→5, puis évolution).
    Onglet « Peinture » : peintures d'armes du Garage, aperçu en direct.
-   Onglet « Armes » : acheter les armes secondaires, les monter de niveau, les faire évoluer.
-   Règle pour le joueur : l'Entraînement améliore la survivante, les établis ses armes,
-   les refuges sa survie.
+   L'arme principale et l'équipement se choisissent avant la partie (classe, js/loadout.js).
+   Règle pour le joueur : la classe se choisit avant la partie, les établis améliorent l'arme et l'équipement,
+   les refuges aident à survivre.
    Pièces visibles : voir applyGunMods() dans render3d.js.
    ===================================================================== */
 
-/** Établis sur la carte (zone = s'ouvre avec la zone). big : l'Armurerie du centre commercial */
+/** Établis sur la carte (zone = s'ouvre avec la zone) */
 const BENCHES = MAP.benches; // emplacements propres à chaque carte (world.js)
 for (const b of BENCHES) MAP.props.push({ model: 'p_bench', x: b.x, y: b.y, w: b.big ? 84 : 56, d: b.big ? 30 : 26, rot: b.rot, bench: true });
 
-const GUN_COST = [50, 100, 170]; // prix des niveaux 1, 2, 3 d'une pièce (ferraille de la partie)
-/* Onglet « Armes » (ferraille de la partie) */
+const GUN_COST = [60, 130, 240, 380]; // prix des niveaux 1, 2, 3 (4 : puissance) d'une pièce (ferraille de la partie)
+/* Onglet « Équipement » (ferraille de la partie) */
 const WEAPON_SHOP = {
-  buy: 150,                    // nouvelle arme secondaire (niveau 1)
-  level: l => 70 + l * 40,     // passer du niveau l au niveau l+1
-  evo: 280,                    // évolution, quand l'arme est au niveau max
+  level: l => 90 + l * 60,     // passer du niveau l au niveau l+1
+  evo: 420,                    // évolution, quand l'équipement est au niveau max
+};
+/** Pièce « puissance » du fusil à pompe / lance-flammes : +1 niveau d'arme ; au dernier niveau, l'évolution */
+const powerUp = id => (p, g) => {
+  const w = g.weapons[id]; if (!w) return;
+  w.lvl = Math.min(5, w.lvl + 1);
+  if (w.lvl >= 5 && !w.evo) { w.evo = true; g.stats.evolved++; if (g.gs) g.gs.evo = EVOLUTIONS.find(e => e.weapon === id); }
 };
 
 /* Pièces par arme. lv : nom de la pièce montée à chaque niveau (0 = d'origine) */
@@ -55,6 +61,8 @@ const GUN_PARTS = {
         lv: ['Pompe en bois', 'Pompe striée', 'Pompe en acier', 'Pompe à ressort + tube'] },
       { id: 'shells', icon: '🧨', name: 'Cartouchière', stat: 'Plombs', fx: '+1 plomb par tir',
         lv: ['Sans cartouchière', '4 cartouches', '8 cartouches', 'Cartouches magnum'] },
+      { id: 'power', icon: '⚙️', name: 'Calibre', stat: 'Puissance', max: 4, fx: '+1 plomb, +20 % dégâts ; au niveau IV : Canon à mitraille',
+        lv: ['Calibre 12', 'Calibre renforcé', 'Magnum', 'Chevrotine lourde', 'Canon à mitraille'], apply: powerUp('shotgun') },
     ],
   },
   flamer: {
@@ -66,6 +74,8 @@ const GUN_PARTS = {
         lv: ['Réservoir simple', 'Grand réservoir', 'Double réservoir', 'Double réservoir sous pression'] },
       { id: 'igniter', icon: '⚡', name: 'Allumeur', stat: 'Largeur', fx: 'Cône de flammes +12 %',
         lv: ['Veilleuse', 'Bobine d\'allumage', 'Double bobine', 'Anneau à plasma'] },
+      { id: 'power', icon: '⚙️', name: 'Pression', stat: 'Puissance', max: 4, fx: '+25 % dégâts ; au niveau IV : Souffle du dragon',
+        lv: ['Pression d\'usine', 'Pression haute', 'Surpression', 'Pression critique', 'Souffle du dragon'], apply: powerUp('flamer') },
     ],
   },
 };
@@ -73,12 +83,16 @@ const GUN_PARTS = {
 const Gunsmith = {
   init(g) { g.gunMods = { rifle: {}, shotgun: {}, flamer: {} }; g.gs = null; },
   lvl(g, gun, part) { return (g && g.gunMods && g.gunMods[gun] && g.gunMods[gun][part]) || 0; },
-  /** Armes qu'on peut modifier : le fusil d'assaut + les armes équipables obtenues */
-  guns(g) { return ['rifle', ...MAIN_WEAPONS.filter(id => id !== 'rifle' && g.weapons[id])]; },
+  /** Arme modifiable : l'arme principale de la classe (famille : fusil, pompe ou lance-flammes) */
+  guns(g) { return [g.primaryKind || 'rifle']; },
+  maxOf(part) { return (part && part.max) || 3; },
   part(gun, id) { return GUN_PARTS[gun].parts.find(p => p.id === id); },
   /** Prix réduits pour Vega la mécano (p.benchDiscount) */
   price(g, base) { return Math.round(base * (1 - ((g.player && g.player.benchDiscount) || 0))); },
   partCost(g, lvl) { return this.price(g, GUN_COST[lvl]); },
+  /** Niveau d'arme requis pour monter une pièce au niveau `to` (progress.js : PART_REQ) */
+  partReq(to) { return PART_REQ[to] || 1; },
+  levelOk(g, to) { return Progress.wLevel(g.primary, g).lvl >= this.partReq(to); },
 
   /** Établi proche (dans une zone ouverte) */
   near(x, y, maxD = 62) {
@@ -93,7 +107,7 @@ const Gunsmith = {
   tune(g, id, s) {
     if (!g.gunMods) return s;
     const L = k => this.lvl(g, id, k);
-    if (id === 'shotgun') { s.range *= 1 + 0.15 * L('barrel'); s.cd *= Math.pow(1 / 1.12, L('pump')); s.pellets += L('shells'); }
+    if (id === 'shotgun') { s.range *= 1 + 0.15 * L('barrel'); s.cd *= Math.pow(1 / 1.12, L('pump')); s.pellets += L('shells'); s.cd /= (g.player && g.player.rateMult) || 1; }
     else if (id === 'flamer') { s.range *= 1 + 0.12 * L('nozzle'); s.dmg *= 1 + 0.15 * L('tank'); s.cone *= 1 + 0.12 * L('igniter'); }
     return s;
   },
@@ -109,22 +123,22 @@ const Gunsmith = {
         ['Perforation', w.pierce, 8], ['Critique', w.critChance * 100, 60, '%'],
       ];
     }
-    const wl = (g.weapons[gun] && g.weapons[gun].lvl) || 1;
+    const pw = extraPart === 'power', wl = Math.min(5, ((g.weapons[gun] && g.weapons[gun].lvl) || 1) + (pw ? 1 : 0));
     const save = g.gunMods[gun][extraPart];
-    if (extraPart) g.gunMods[gun][extraPart] = (save || 0) + 1;
+    if (extraPart && !pw) g.gunMods[gun][extraPart] = (save || 0) + 1;
     const s = this.tune(g, gun, WEAPONS[gun].stats(wl));
-    if (extraPart) g.gunMods[gun][extraPart] = save;
+    if (extraPart && !pw) g.gunMods[gun][extraPart] = save;
     if (gun === 'shotgun') return [['Dégâts', s.dmg * s.pellets, 140], ['Cadence', 1 / s.cd, 3], ['Portée', s.range, 500], ['Plombs', s.pellets, 16]];
     return [['Dégâts', s.dmg / s.tick, 120], ['Portée', s.range, 360], ['Largeur', s.cone * 114.6, 90, '°']];
   },
 
   open(g, bench) {
     if (g.state !== 'playing' || g.player.inside) return;
-    const gun = this.guns(g).includes(g.active) ? g.active : 'rifle';
-    // l'Armurerie s'ouvre sur l'onglet « Armes »
-    g.gs = { bench, gun, part: GUN_PARTS[gun].parts[0].id, tab: BENCHES[bench] && BENCHES[bench].big ? 'arms' : 'parts', skin: null, pulse: 0, yaw: 0 };
+    const gun = this.guns(g)[0];
+    g.gs = { bench, gun, part: GUN_PARTS[gun].parts[0].id, tab: 'parts', skin: null, pulse: 0, yaw: 0 };
     g.state = 'gunsmith';
     g.banner = null;
+    if (g.tut) g.tut.bench = true;
     Input.reset(); Input.releaseJoystick();
     Sfx.play('reload');
     UI.setHudButtons(false);
@@ -163,7 +177,7 @@ const Gunsmith = {
     const gs = g.gs; if (!gs) return;
     const gun = gs.gun, l = this.lvl(g, gun, partId), part = this.part(gun, partId);
     const cost = this.partCost(g, l);
-    if (!part || l >= 3 || g.coins < cost) { Sfx.play('clang'); return; }
+    if (!part || l >= this.maxOf(part) || g.coins < cost || !this.levelOk(g, l + 1)) { Sfx.play('clang'); return; }
     g.coins -= cost; gs.bought = (gs.bought || 0) + 1;
     g.gunMods[gun][partId] = l + 1;
     if (part.apply) part.apply(g.player, g);
@@ -175,11 +189,11 @@ const Gunsmith = {
   /** Peintures : aperçu (même non débloquée), équiper, acheter avec la réserve */
   preview(g, id) { if (!g.gs) return; g.gs.skin = id; UI.showGunsmith(g); },
 
-  /* ---------------- onglet « Armes » : acheter, monter de niveau, faire évoluer ---------------- */
-  /** Prochaine action possible sur une arme secondaire : { kind: 'buy'|'level'|'evo'|'max'|'full', cost } */
+  /* ---------------- onglet « Équipement » : monter de niveau, faire évoluer ---------------- */
+  /** Prochaine action possible sur un équipement de la classe : { kind: 'level'|'evo'|'max'|'none', cost } */
   weaponOffer(g, id) {
     const w = g.weapons[id], def = WEAPONS[id];
-    if (!w) return Weapons.sideCount(g) >= MAX_SIDE_WEAPONS ? { kind: 'full' } : { kind: 'buy', cost: this.price(g, WEAPON_SHOP.buy) };
+    if (!w) return { kind: 'none' };
     if (w.lvl < def.max) return { kind: 'level', cost: this.price(g, WEAPON_SHOP.level(w.lvl)) };
     if (!w.evo && EVOLUTIONS.some(e => e.weapon === id)) return { kind: 'evo', cost: this.price(g, WEAPON_SHOP.evo) };
     return { kind: 'max' };
@@ -188,7 +202,7 @@ const Gunsmith = {
     const o = this.weaponOffer(g, id);
     if (!o.cost || g.coins < o.cost) { Sfx.play('clang'); return; }
     g.coins -= o.cost;
-    if (o.kind === 'buy' || o.kind === 'level') Weapons.levelUp(g, id);
+    if (o.kind === 'level') Weapons.levelUp(g, id);
     else { g.weapons[id].evo = true; g.stats.evolved++; if (g.gs) g.gs.evo = EVOLUTIONS.find(e => e.weapon === id); }
     if (g.gs) g.gs.bought = (g.gs.bought || 0) + 1;
     g.upLevels['w_' + id] = g.weapons[id].lvl;

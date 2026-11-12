@@ -1,12 +1,12 @@
 /* Service worker : met tout le jeu en cache pour jouer hors ligne.
    Changez VERSION à chaque mise à jour du jeu pour forcer le rafraîchissement. */
-const VERSION = 'deadsand-v18';
+const VERSION = 'deadsand-v25';
 const WORLD_MODELS = ['barracks', 'bld_a', 'bld_b', 'bld_big', 'bld_business', 'bld_c', 'car', 'container_green', 'container_red', 'dog', 'gascan', 'gastank', 'police', 'suv'];
 const FILES = [
   './', 'index.html', 'style.css', 'manifest.webmanifest',
   'icons/icon.svg', 'icons/icon-192.png', 'icons/icon-512.png',
   'assets/audio/manifest.json', 'js/config.js', 'js/utils.js', 'js/world.js', 'js/save.js', 'js/cosmetics.js', 'js/input.js', 'js/music.js', 'js/audio.js',
-  'js/entities.js', 'js/weapons.js', 'js/story.js', 'js/waves.js', 'js/allies.js', 'js/inventory.js', 'js/gunsmith.js', 'js/fun.js', 'js/progress.js', 'js/ui.js', 'js/main.js', 'js/render3d.js',
+  'js/entities.js', 'js/weapons.js', 'js/story.js', 'js/waves.js', 'js/allies.js', 'js/inventory.js', 'js/gunsmith.js', 'js/fun.js', 'js/progress.js', 'js/loadout.js', 'js/tutorial.js', 'js/online.js', 'js/forts.js', 'js/ui.js', 'js/main.js', 'js/render3d.js',
   'assets/models/survivor.glb', 'assets/models/scout.glb', 'assets/models/swat.glb', 'assets/models/zombie.glb',
   ...WORLD_MODELS.map(n => `assets/models/world/${n}.glb`),
   'vendor/three/build/three.module.js',

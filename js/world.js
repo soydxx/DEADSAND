@@ -111,11 +111,10 @@ const MAP_DESERT = {
   gasStation: { x: 315, y: 1225 },   // zone à tenir (objectif) sous l'auvent
   startPos: { x: 1250, y: 1330 },
   generator: { x: 1200, y: 470 },    // objectif « Défendre le générateur »
-  // établis (gunsmith.js) ; big = l'Armurerie
+  // établis (gunsmith.js) : un par zone
   benches: [
     { x: 875, y: 1250, zone: 'parking', rot: Math.PI / 2 },
-    { x: 1548, y: 1105, zone: 'parking', rot: -Math.PI / 2 },
-    { x: 1110, y: 368, zone: 'mall', rot: 0, big: true, name: 'Armurerie' },
+    { x: 1110, y: 368, zone: 'mall', rot: 0 },
     { x: 610, y: 640, zone: 'slums', rot: 0 },
     { x: 1900, y: 700, zone: 'base', rot: 0 },
   ],
@@ -195,15 +194,105 @@ const MAP_HIGHWAY = {
   generator: { x: 1200, y: 470 },
   benches: [
     { x: 950, y: 880, zone: 'parking', rot: 0 },
-    { x: 1548, y: 1000, zone: 'parking', rot: -Math.PI / 2 },
-    { x: 1110, y: 305, zone: 'mall', rot: 0, big: true, name: 'Armurerie' },
+    { x: 1110, y: 305, zone: 'mall', rot: 0 },
     { x: 560, y: 420, zone: 'slums', rot: 0 },
     { x: 2050, y: 560, zone: 'base', rot: 0 },
   ],
   lamps: [[880, 1150], [1520, 1100], [880, 420], [1520, 420], [1700, 900], [2300, 300], [600, 1100], [300, 700]],
   sandbags: [[1700, 1300], [1720, 1330], [2250, 900], [1650, 300], [1680, 330], [2300, 1250]],
 };
-const MAPS = { desert: MAP_DESERT, highway: MAP_HIGHWAY };
+/* Troisième carte (débloquée en atteignant la vague 15) : un centre-ville où il fait toujours nuit
+   (night: true). Lampadaires partout, tours, gare, rues encombrées de voitures abandonnées. */
+const MAP_CITY = {
+  id: 'city', name: 'Centre-ville de nuit', icon: '🌃', night: true,
+  W: 2400, H: 1600, cell: 25, wallT: 26,
+  zones: [
+    { id: 'parking', name: 'Place de la mairie', x0: 800, y0: 800, x1: 1600, y1: 1600, unlock: 1, ground: 'plaza' },
+    { id: 'mall', name: 'Gare centrale', x0: 800, y0: 0, x1: 1600, y1: 800, unlock: 5, ground: 'parking' },
+    { id: 'slums', name: 'Quartier des bars', x0: 0, y0: 0, x1: 800, y1: 1600, unlock: 10, ground: 'ruins' },
+    { id: 'base', name: 'Commissariat & hôpital', x0: 1600, y0: 0, x1: 2400, y1: 1600, unlock: 15, ground: 'base' },
+  ],
+  separators: MAP_DESERT.separators,
+  buildings: [
+    { id: 'pharmacy', model: 'bld_c', x0: 850, y0: 826, x1: 1070, y1: 930, h: 100, door: 'S', zone: 'parking' },
+    { id: 'cityhall', model: 'bld_b', x0: 1420, y0: 830, x1: 1560, y1: 960, h: 230, zone: 'parking' },
+    { id: 'mall', model: 'bld_big', x0: 1010, y0: 70, x1: 1390, y1: 330, h: 210, zone: 'mall' },
+    { id: 'market1', model: 'bld_business', x0: 850, y0: 480, x1: 990, y1: 600, h: 90, zone: 'mall' },
+    { id: 'market2', model: 'bld_business', x0: 1410, y0: 480, x1: 1550, y1: 600, h: 90, zone: 'mall', rot: Math.PI },
+    { id: 'workshop', model: 'bld_a', x0: 150, y0: 200, x1: 470, y1: 390, h: 160, door: 'S', zone: 'slums' },
+    { id: 'tower', model: 'bld_b', x0: 560, y0: 880, x1: 680, y1: 1010, h: 240, zone: 'slums' },
+    { id: 'bar', model: 'bld_business', x0: 520, y0: 600, x1: 680, y1: 720, h: 80, zone: 'slums' },
+    { id: 'house1', model: 'barracks', x0: 90, y0: 640, x1: 230, y1: 770, h: 85, zone: 'slums' },
+    { id: 'hospital', model: 'bld_c', x0: 1830, y0: 120, x1: 2190, y1: 330, h: 130, door: 'S', zone: 'base', tint: '#f2f2f2' },
+    { id: 'police1', model: 'barracks', x0: 1760, y0: 1060, x1: 1900, y1: 1180, h: 90, zone: 'base', tint: '#a8b8d8' },
+    { id: 'police2', model: 'barracks', x0: 2000, y0: 1060, x1: 2140, y1: 1180, h: 90, zone: 'base', tint: '#a8b8d8' },
+    { id: 'tower3', model: 'bld_b', x0: 2220, y0: 700, x1: 2350, y1: 830, h: 220, zone: 'base' },
+  ],
+  props: [
+    // place de la mairie : embouteillage, police, ambulance
+    { model: 'police', x: 1000, y: 1120, w: 44, d: 92, rot: 0.4 },
+    { model: 'car', x: 1430, y: 1080, w: 40, d: 82, rot: -1.2 },
+    { model: 'p_bus', x: 1470, y: 1300, w: 50, d: 150, rot: 0.1 },
+    { model: 'p_ambulance', x: 1140, y: 905, w: 44, d: 96, rot: Math.PI / 2 },
+    { model: 'suv_wreck', x: 920, y: 1460, w: 46, d: 92, rot: 1.9 },
+    { model: 'car', x: 1380, y: 1500, w: 40, d: 82, rot: 2.8 },
+    // gare : bus, semi-remorque, voitures abandonnées
+    { model: 'p_semi', x: 1500, y: 200, w: 46, d: 190, rot: 0 },
+    { model: 'car', x: 900, y: 200, w: 40, d: 82, rot: 0.4 },
+    { model: 'p_bus', x: 950, y: 700, w: 50, d: 150, rot: Math.PI / 2, burnt: true },
+    { model: 'container_red', x: 1440, y: 700, w: 150, d: 66, rot: 0 },
+    // quartier des bars
+    { model: 'p_tanker', x: 600, y: 1440, w: 48, d: 180, rot: 0.3 },
+    { model: 'gastank', x: 230, y: 1150, w: 46, d: 46, rot: 0 },
+    { model: 'gastank', x: 400, y: 1150, w: 46, d: 46, rot: 0 },
+    { model: 'car', x: 380, y: 560, w: 40, d: 82, rot: 1.7 },
+    { model: 'police', x: 160, y: 1000, w: 44, d: 92, rot: 0.2 },
+    // commissariat & hôpital
+    { model: 'police', x: 1950, y: 560, w: 44, d: 92, rot: -0.3 },
+    { model: 'police', x: 2080, y: 940, w: 44, d: 92, rot: 1.4 },
+    { model: 'p_ambulance', x: 1780, y: 380, w: 44, d: 96, rot: Math.PI / 2 },
+    { model: 'p_heli', x: 2270, y: 420, w: 70, d: 150, rot: -0.3, medic: true },
+    { model: 'p_army', x: 1760, y: 820, w: 48, d: 150, rot: 0 },
+    { model: 'container_green', x: 2100, y: 1400, w: 150, d: 66, rot: 0 },
+  ],
+  decor: [
+    { kind: 'cones', x: 1200, y: 1560, rot: 0 }, { kind: 'cones', x: 1035, y: 1170, rot: 0.4 },
+    { kind: 'bags', x: 1090, y: 960 }, { kind: 'bags', x: 1560, y: 1560 }, { kind: 'bodybags', x: 1020, y: 1020 },
+    { kind: 'sign', x: 1290, y: 1545, text: 'COUVRE-FEU', sub: '→ COMMISSARIAT' },
+    { kind: 'graffiti', x: 1200, y: 1010, text: 'LA VILLE EST MORTE', rot: 0.05 },
+    { kind: 'crates', x: 960, y: 430 }, { kind: 'carts', x: 1300, y: 420 },
+    { kind: 'graffiti', x: 1200, y: 610, text: 'DERNIER TRAIN PARTI', rot: 0.06 },
+    { kind: 'barrelfire', x: 520, y: 330 }, { kind: 'barrelfire', x: 300, y: 860 }, { kind: 'campfire', x: 610, y: 470 },
+    { kind: 'mattress', x: 700, y: 330, rot: 0.5 }, { kind: 'tires', x: 120, y: 1300 },
+    { kind: 'graffiti', x: 330, y: 830, text: 'HAPPY HOUR ÉTERNEL', rot: 0.2 },
+    { kind: 'tent', x: 2080, y: 560, color: '#e8e4dc', medic: true, rot: 0 },
+    { kind: 'crates', x: 1920, y: 960, military: true }, { kind: 'barrelfire', x: 1960, y: 1290 }, { kind: 'barrelfire', x: 2330, y: 560 },
+    { kind: 'watchtower', x: 2330, y: 1080 },
+    { kind: 'graffiti', x: 1950, y: 1500, text: 'POLICE · NE PAS ENTRER', rot: 0 },
+  ],
+  crows: [{ x: 1200, y: 1000 }, { x: 600, y: 1440 }, { x: 2050, y: 900 }],
+  car: { x: 1200, y: 1330, w: 46, d: 96 },
+  gasStation: { x: 315, y: 1225 },
+  startPos: { x: 1250, y: 1330 },
+  generator: { x: 1200, y: 470 },
+  benches: [
+    { x: 875, y: 1250, zone: 'parking', rot: Math.PI / 2 },
+    { x: 1110, y: 368, zone: 'mall', rot: 0 },
+    { x: 400, y: 470, zone: 'slums', rot: 0 },
+    { x: 1900, y: 700, zone: 'base', rot: 0 },
+  ],
+  // beaucoup de lampadaires : c'est toujours la nuit en ville
+  lamps: [[880, 1060], [1520, 1060], [880, 1540], [1520, 1540], [1200, 1180], [1200, 1480], [880, 380], [1520, 380], [1200, 640],
+    [300, 480], [700, 480], [300, 1080], [700, 1300], [1700, 700], [2300, 300], [1700, 1300], [2300, 1300], [2000, 950]],
+  sandbags: [[1700, 1350], [1720, 1380], [2250, 1000], [2270, 1030], [1650, 300], [1670, 330]],
+};
+const MAPS = { desert: MAP_DESERT, highway: MAP_HIGHWAY, city: MAP_CITY };
+/** Conditions pour jouer sur une carte (Préparation → Équipe → Carte) */
+const MAP_REQ = {
+  highway: { ok: S => !!S.ach.escape, text: '🔒 Évadez-vous une fois' },
+  city: { ok: S => !!S.ach.w15, text: '🔒 Atteignez la vague 15' },
+};
+const mapOpen = id => !MAP_REQ[id] || MAP_REQ[id].ok(Save.data);
 /* Carte choisie dans la Préparation (lue directement dans la sauvegarde : save.js n'est pas encore chargé) */
 const MAP = (() => { try { const s = JSON.parse(localStorage.getItem('deadsand.save')); return MAPS[s && s.settings && s.settings.map] || MAP_DESERT; } catch (e) { return MAP_DESERT; } })();
 

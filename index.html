@@ -36,11 +36,42 @@
   <div id="ctx-buttons">
     <button id="btn-action" class="ctx-btn hidden"></button>
     <button id="btn-next" class="ctx-btn next hidden"></button>
+    <button id="btn-build" class="ctx-btn build hidden"></button>
   </div>
+  <div id="buildbar" class="hidden"></div>
   <div id="toast" aria-live="polite"></div>
   <div id="rotate" aria-hidden="true"><div class="phone"></div><p>Tournez votre téléphone</p><small>Deadsand se joue à l'horizontale</small></div>
 
-  <div id="loading"><div class="spinner"></div><p>Chargement…</p></div>
+  <div id="loading">
+    <img class="load-logo" src="icons/icon.svg" alt="">
+    <h1 class="title">DEAD<span>SAND</span></h1>
+    <div class="load-bar"><i></i></div>
+    <p class="load-tip" id="load-tip"></p>
+  </div>
+  <script>
+    // astuces de l'écran de chargement (changent toutes les 3,5 s jusqu'au démarrage du jeu)
+    (function () {
+      var tips = [
+        '💡 Votre arme tire toute seule : concentrez-vous sur vos déplacements.',
+        '💡 Cliquez (ou touchez) un zombie ou un fût pour le viser en priorité.',
+        '💡 Pendant une roulade, vous êtes invincible : traversez la horde !',
+        '💡 Un fût rouge au milieu de la horde, c\'est un carnage assuré.',
+        '💡 L\'arme secondaire en main, vous courez plus vite.',
+        '💡 Les établis 🔧 améliorent votre arme, les refuges vous aident à survivre.',
+        '💡 Les pièces de niveau III demandent une arme de niveau 3 : utilisez-la !',
+        '💡 Un survivant appelle à l\'aide ? Rejoignez-le : ferraille ou renfort armé.',
+        '💡 Plus vous tenez de vagues, plus vous gardez de ferraille à la fin.',
+        '💡 Les kamikazes orange explosent au contact : abattez-les de loin.',
+        '💡 Le Bélier se sonne s\'il fonce dans un mur : faites-le charger contre un bâtiment.',
+        '💡 Vagues spéciales (coureurs, panne, double boss) : prime ×1,5 à la fin.',
+        '💡 Défis d\'armes dans l\'onglet Missions : ils débloquent des camouflages.',
+        '💡 Au niveau 50, passez prestige : vous gardez tout et gagnez un insigne ⭐.',
+        '💡 Réparez la voiture (4 pièces) pour vous évader et débloquer une nouvelle carte.'
+      ], el = document.getElementById('load-tip'), i = Math.floor(Math.random() * tips.length);
+      function next() { if (!document.getElementById('loading')) return; el.style.opacity = 0; setTimeout(function () { el.textContent = tips[i++ % tips.length]; el.style.opacity = 1; }, 250); setTimeout(next, 3500); }
+      next();
+    })();
+  </script>
   <div id="overlay" class="hidden"></div>
   <div id="safe-probe" aria-hidden="true"></div>
 
@@ -62,6 +93,10 @@
   <script src="js/gunsmith.js"></script>
   <script src="js/fun.js"></script>
   <script src="js/progress.js"></script>
+  <script src="js/loadout.js"></script>
+  <script src="js/tutorial.js"></script>
+  <script src="js/online.js"></script>
+  <script src="js/forts.js"></script>
   <script src="js/ui.js"></script>
   <script src="js/main.js"></script>
   <!-- Rendu 3D : charge les modèles puis démarre le jeu -->

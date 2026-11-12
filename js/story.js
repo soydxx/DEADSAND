@@ -17,21 +17,36 @@ const STORY = {
   door: { hp: 260, reinforce: 150 },
   repairTime: 14, repairRadius: 75,
   eventChance: 0.35, // vagues 3+ : probabilité d'un événement (horde de coureurs / ravitaillement)
+  supplyShare: 0.3,  // part des événements qui sont des ravitaillements (le reste : hordes de coureurs)
+  supply: { crates: 2, heal: 12, scrap: 15 },
 };
 
-/* Objectifs : chacun rapporte une pièce de la voiture. Ils restent actifs jusqu'à réussite. */
+/* Objectifs : chacun rapporte une pièce de la voiture. Ils restent actifs jusqu'à réussite.
+   4 étapes (vague, zone, pièce) ; à chaque partie, le type d'objectif de chaque étape est tiré au hasard
+   dans sa liste (pool), sans répéter deux fois le même type. Liste de la partie : g.objList (Story.begin). */
 const OBJECTIVES = [
-  { wave: 3, type: 'fetch', item: 'gascan', zone: 'parking', name: "Trouver un bidon d'essence", short: 'Essence', reward: 80 },
-  { wave: 7, type: 'defend', zone: 'mall', name: 'Défendre le générateur', short: 'Bougies', at: MAP.generator, hp: 420, reward: 120 },
-  { wave: 12, type: 'hold', zone: 'slums', name: 'Siphonner la station-service', short: 'Courroie', at: MAP.gasStation, r: 85, time: 22, reward: 160 },
-  { wave: 16, type: 'fetch', item: 'battery', zone: 'base', name: "Récupérer une batterie à l'hôpital", short: 'Batterie', reward: 200 },
+  { wave: 3, zone: 'parking', short: 'Essence', reward: 80, pool: ['gascan', 'flares', 'escort'] },
+  { wave: 7, zone: 'mall', short: 'Bougies', reward: 120, pool: ['generator', 'airdrop', 'flares'] },
+  { wave: 12, zone: 'slums', short: 'Courroie', reward: 160, pool: ['station', 'escort', 'airdrop'] },
+  { wave: 16, zone: 'base', short: 'Batterie', reward: 200, pool: ['battery', 'flares', 'escort', 'airdrop'] },
 ];
+const OBJ_TYPES = {
+  gascan: { type: 'fetch', item: 'gascan', name: "Trouver un bidon d'essence" },
+  battery: { type: 'fetch', item: 'battery', name: 'Récupérer une batterie' },
+  generator: { type: 'defend', name: 'Défendre le générateur', at: () => MAP.generator, hp: 700 },
+  station: { type: 'hold', name: 'Siphonner la station-service', at: () => MAP.gasStation, r: 85, time: 22 },
+  flares: { type: 'flares', name: 'Allumer 3 fusées de détresse', n: 3, time: 2.5 },          // rester 2,5 s près de chaque fusée (pendant la vague)
+  escort: { type: 'escort', name: 'Escorter un survivant jusqu\'à la voiture' },              // il vous suit ; la horde s'en prend à lui
+  airdrop: { type: 'airdrop', name: 'Récupérer le colis largué' },                           // il tombe au milieu d'une horde, à rapporter à la voiture
+};
+/* Survivants à sauver : appellent à l'aide pendant une vague ; une fois rejoints, ferraille ou renfort armé */
+const RESCUE = { chance: 0.4, fromWave: 3, life: 45, helperLife: 45, helperDmg: 7, helperRate: 2.2, helperRange: 320 };
 
 /* Achats dans les refuges (ferraille de la partie) : tout ce qui aide la SURVIVANTE à tenir.
    Les armes, elles, s'améliorent aux établis (js/gunsmith.js). max : nombre d'achats possibles par partie. */
 const SHELTER_ITEMS = {
   clinic: [
-    { id: 'medkit', icon: '🩹', name: 'Trousse de soins', desc: '+40 PV immédiatement', cost: () => 40, buy: g => { g.player.hp = Math.min(g.player.maxHp, g.player.hp + 40); } },
+    { id: 'medkit', icon: '🩹', name: 'Trousse de soins', desc: '+40 PV immédiatement', cost: () => 40, buy: g => { g.player.hp = Math.min(g.player.maxHp, g.player.hp + 40 * (g.player.healMult || 1)); } },
     { id: 'regen', icon: '🥫', name: 'Rations', desc: '+1 PV/s, jusqu\'à 35 % de la vie par vague', max: 5, cost: g => 110 + (g.buys.regen || 0) * 70, buy: g => { g.player.regen += 1; } },
     { id: 'vampire', icon: '💉', name: 'Seringue de rage', desc: '+1 PV tous les 3 zombies abattus (4 PV/s max)', max: 3, cost: g => 160 + (g.buys.vampire || 0) * 100, buy: g => { g.player.lifeOnKill += 1 / 3; } },
   ],
@@ -58,11 +73,33 @@ const Story = {
     g.parts = 0; g.objective = null; g.objDone = {}; g.victory = false;
     g.car = { x: MAP.car.x, y: MAP.car.y + 520, yaw: Math.PI, show: true, smoke: false };
     g.showPlayer = false; g.camZoom = 1.35;
-    g.night = false; g.storm = null; g.stormDone = false;
+    g.night = !!MAP.night; g.storm = null; g.stormDone = false; // centre-ville : toujours la nuit
     g.shelters = {}; g.doorBonus = 0; g.buys = {}; g.crates = []; g.acid = []; g.event = null;
+    g.rescues = []; g.helpers = []; g.blackout = false; g.sosAt = 0;
+    g.objList = this.rollObjectives();
     for (const id of Object.keys(SHELTERS)) g.shelters[id] = { hp: STORY.door.hp, max: STORY.door.hp, broken: false };
     g.player.x = MAP.startPos.x; g.player.y = MAP.startPos.y;
     Sfx.play('engine');
+  },
+
+  /** Objectifs de la partie : un type tiré au hasard pour chaque étape, sans doublon */
+  rollObjectives() {
+    const used = new Set();
+    return OBJECTIVES.map(s => {
+      const free = s.pool.filter(k => !used.has(k)), key = (free.length ? free : s.pool)[Math.floor(Math.random() * (free.length || s.pool.length))];
+      used.add(key);
+      const T = OBJ_TYPES[key];
+      return Object.assign({}, T, { key, wave: s.wave, zone: s.zone, short: s.short, reward: s.reward, at: typeof T.at === 'function' ? T.at() : T.at });
+    });
+  },
+  /** Point à rejoindre pour l'objectif en cours (flèches, mini-carte), ou null */
+  objPoint(g) {
+    const o = g.objective, p = g.player;
+    if (!o || o.failed) return null;
+    if (o.type === 'fetch') return o.item.carried ? MAP.car : o.item;
+    if (o.type === 'escort') return o.npc.follow ? MAP.car : o.npc;
+    if (o.type === 'flares') { let best = null, bd = 1e9; for (const f of o.flares) if (!f.lit) { const d = Math.hypot(f.x - p.x, f.y - p.y); if (d < bd) { bd = d; best = f; } } return best; }
+    return o.gen || o.at;
   },
 
   /** Cinématique d'intro : la voiture freine sur le parking, la survivante en sort */
@@ -89,25 +126,39 @@ const Story = {
   onWaveStart(g, n) {
     g.phase = 'wave';
     const M = g.mods || {};
-    g.night = M.night || (n >= STORY.nightEvery && n % STORY.nightEvery === 0);
+    g.night = M.night || MAP.night || (n >= STORY.nightEvery && n % STORY.nightEvery === 0);
     g.storm = null; g.stormDone = M.storm ? false : (g.night || n < 6 || Math.random() > STORY.stormChance);
     g.stormAt = M.storm ? U.rand(2, 6) : U.rand(8, 18);
     // portes réparées entre les vagues
     for (const s of Object.values(g.shelters)) { s.broken = false; s.hp = s.max; }
-    // événement de vague (pas pendant les boss) : horde de coureurs ou ravitaillement largué
-    g.event = null;
-    if (!g.wave.isBoss && n >= 3 && Math.random() < STORY.eventChance) {
-      g.event = Math.random() < 0.5 ? 'rush' : 'supply';
-      if (g.event === 'rush') for (let i = 0; i < 6 + n; i++) g.wave.queue.splice(Math.floor(Math.random() * (g.wave.queue.length + 1)), 0, 'fast');
-      else this.dropSupplies(g, 3);
+    // événement de vague : vague spéciale (prime ×1,5), horde de coureurs ou ravitaillement largué
+    g.event = null; g.blackout = false;
+    const r = Math.random(), W = g.wave; W.bossType2 = null;
+    if (W.isBoss && n >= 20) { // double boss : un second boss différent arrive un peu après le premier
+      const others = Object.keys(ENEMY_TYPES).filter(k => ENEMY_TYPES[k].boss && k !== W.bossType);
+      if (others.length) { W.bossType2 = others[Math.floor(Math.random() * others.length)]; W.queue.splice(Math.min(W.queue.length, 6), 0, W.bossType2); g.event = 'doubleboss'; }
+    } else if (!W.isBoss && n >= 5 && r < 0.12) { // vague de coureurs : que des coureurs et des rampants
+      g.event = 'runners';
+      W.queue = W.queue.map(() => (Math.random() < 0.8 ? 'fast' : 'crawler'));
+      for (let i = 0; i < Math.round(W.queue.length * 0.2); i++) W.queue.push('fast');
+    } else if (!W.isBoss && n >= 6 && (!g.night || MAP.night) && r < 0.22) { // panne de courant : nuit sans lampe torche ni lampadaires
+      g.event = 'blackout'; g.night = true; g.blackout = true;
+    } else if (!W.isBoss && n >= 3 && Math.random() < STORY.eventChance) {
+      g.event = Math.random() < STORY.supplyShare ? 'supply' : 'rush';
+      if (g.event === 'rush') for (let i = 0; i < 6 + n; i++) W.queue.splice(Math.floor(Math.random() * (W.queue.length + 1)), 0, 'fast');
+      else this.dropSupplies(g, STORY.supply.crates);
     }
-    // objectif de la vague (ou celui en cours qui n'est pas réussi)
+    // survivant à sauver pendant la vague (appel à l'aide quelques secondes après le début)
+    g.sosAt = !W.isBoss && n >= RESCUE.fromWave && Math.random() < RESCUE.chance ? U.rand(6, 22) : 0;
+    // objectif de la vague (ou celui en cours qui n'est pas réussi : générateur détruit, survivant mort…)
     if (!g.objective) {
-      const o = OBJECTIVES.find(ob => ob.wave <= n && !g.objDone[ob.wave] && World.isUnlocked(ob.zone));
+      const o = (g.objList || []).find(ob => ob.wave <= n && !g.objDone[ob.wave] && World.isUnlocked(ob.zone));
       if (o) this.startObjective(g, o);
       else if (g.parts >= OBJECTIVES.length && !g.victory) this.startObjective(g, { type: 'repair', name: 'Réparer la voiture et fuir !', short: 'Fuite', at: MAP.car, r: STORY.repairRadius, time: STORY.repairTime, reward: 500 });
-    } else if (g.objective.type === 'defend' && g.objective.failed) this.startObjective(g, g.objective.def);
+    } else if (g.objective.failed) this.startObjective(g, g.objective.def);
   },
+  /** Vague spéciale : prime de fin de vague augmentée */
+  specialWave(g) { return g.event === 'runners' || g.event === 'blackout' || g.event === 'doubleboss'; },
 
   updateWave(g, dt) {
     // tempête de sable
@@ -119,20 +170,50 @@ const Story = {
     if (g.storm) { g.storm.t += dt; if (g.storm.t > g.storm.dur) g.storm = null; }
     this.updateObjective(g, dt);
     this.updateSupplies(g, dt);
+    this.updateRescues(g, dt);
     // fumée du capot tant que la voiture est en panne
     if (g.car.smoke && Math.random() < 0.08) Entities.puff(g, g.car.x, g.car.y - 30, 1, 10);
+  },
+
+  /* ------------------------------ survivants à sauver ------------------------------ */
+  updateRescues(g, dt) {
+    const p = g.player;
+    if (g.sosAt && g.stats.time - g.waveStartTime > g.sosAt) {
+      g.sosAt = 0;
+      const q = World.randomPoint(p.x, p.y, 450, 1000, 20);
+      g.rescues.push({ x: q.x, y: q.y, vx: 0, vy: 0, t: RESCUE.life, role: 'sos', face: 0 });
+      g.showBanner('🆘 UN SURVIVANT APPELLE À L\'AIDE', `Rejoignez-le avant ${RESCUE.life} s (flèche bleue)`, 2.2, '#3ad6ff');
+      Sfx.play('objective');
+    }
+    for (const s of g.rescues) {
+      s.t -= dt;
+      if (s.t <= 0) { s.gone = true; Entities.puff(g, s.x, s.y, 6, 16); continue; }
+      if (!p.inside && Math.hypot(s.x - p.x, s.y - p.y) < 55) {
+        s.gone = true; g.stats.rescued = (g.stats.rescued || 0) + 1;
+        Entities.burst(g, s.x, s.y, '#3ad6ff', 20, 220, 3, 0.6);
+        if (Math.random() < 0.5) {
+          const scrap = Math.round((30 + g.wave.num * 4) * p.scrapMult); g.coins += scrap;
+          Entities.addText(g, s.x, s.y - 40, `Merci ! +${scrap} 🔩`, '#3ad6ff', 18); Sfx.play('chest');
+        } else {
+          g.helpers.push({ x: s.x, y: s.y, vx: 0, vy: 0, t: RESCUE.helperLife, cd: 0.5, aim: 0, fire: 0, role: 'ally', face: 0, slot: g.helpers.length });
+          Entities.addText(g, s.x, s.y - 40, `Je me bats avec vous ! (${RESCUE.helperLife} s)`, '#3ad6ff', 16); Sfx.play('ability');
+        }
+      }
+    }
+    U.compact(g.rescues, s => !s.gone);
   },
 
   /** Fin de vague : pause tactique avant la suivante (après le choix d'amélioration) */
   startBreak(g) {
     g.phase = 'break'; g.breakT = STORY.breakTime;
-    g.night = false; g.storm = null;
+    g.night = !!MAP.night; g.storm = null; g.blackout = false; g.sosAt = 0;
+    if (g.rescues && g.rescues.length) { g.rescues.length = 0; } // les survivants non rejoints sont partis
     if (g.objective && g.objective.type === 'defend') { // le générateur a tenu toute la vague
       if (!g.objective.failed) this.completeObjective(g);
     }
     const next = g.wave.num + 1, z = MAP.zones.find(zz => zz.unlock === next);
     if (z && !World.isUnlocked(z.id)) this.unlockZone(g, z);
-    else g.showBanner('PAUSE', `Ferraille à dépenser : 🔧 établis (armes) · 🏥 refuges (survie) · ${Input.mode === 'touch' ? '▶ pour lancer' : 'N pour lancer'}`, 3, '#7dff6a');
+    else g.showBanner('PAUSE', `🔧 établis · 🏥 refuges · 🧱 fortifier${Input.mode === 'touch' ? '' : ` (${Inventory.label('build')})`} · ${Input.mode === 'touch' ? '▶ pour lancer' : `${Inventory.label('wave')} pour lancer`}`, 3, '#7dff6a');
     for (const s of Object.values(g.shelters)) { s.broken = false; s.hp = s.max; }
   },
   updateBreak(g, dt) {
@@ -164,12 +245,8 @@ const Story = {
       if (!c.landed && c.t >= c.fall) { c.landed = true; Entities.puff(g, c.x, c.y, 8, 18, true); Sfx.play('thud'); }
       if (c.landed && !p.inside && Math.hypot(c.x - p.x, c.y - p.y) < p.r + 20) {
         c.taken = true;
-        p.hp = Math.min(p.maxHp, p.hp + 25); g.coins += 20;
-        // une arme possédée gagne parfois un niveau
-        const owned = Object.entries(g.weapons).filter(([k, w]) => w.lvl < WEAPONS[k].max);
-        let extra = '';
-        if (owned.length && Math.random() < 0.5) { const [k, w] = owned[Math.floor(Math.random() * owned.length)]; w.lvl++; g.upLevels['w_' + k] = w.lvl; extra = ` · ${WEAPONS[k].name} niv. ${w.lvl}`; }
-        Entities.addText(g, c.x, c.y - 30, `+25 PV · +20 🔩${extra}`, '#7dff6a', 15);
+        const S = STORY.supply; p.hp = Math.min(p.maxHp, p.hp + S.heal * (p.healMult || 1)); g.coins += S.scrap;
+        Entities.addText(g, c.x, c.y - 30, `+${S.heal} PV · +${S.scrap} 🔩`, '#7dff6a', 15);
         Sfx.play('heal');
       }
     }
@@ -195,7 +272,24 @@ const Story = {
       const p = World.randomPoint(g.player.x, g.player.y, 320, 1400, 16, def.zone);
       o.item = { x: p.x, y: p.y, kind: def.item, carried: false };
     } else if (def.type === 'defend') {
-      o.gen = { x: def.at.x, y: def.at.y, hp: def.hp * WAVE_CONFIG.hpMult(g.wave.num) / 2, max: def.hp * WAVE_CONFIG.hpMult(g.wave.num) / 2, flash: 0 };
+      // générateur : plus solide à chaque échec ; après 2 échecs, une tourelle de renfort l'accompagne
+      const fails = g.genFails || 0, hp = def.hp * WAVE_CONFIG.hpMult(g.wave.num) * (1 + 0.4 * fails);
+      o.gen = { x: def.at.x, y: def.at.y, hp, max: hp, flash: 0 };
+      if (fails >= 2) { Allies.addTurret(g, def.at.x - 60, def.at.y + 50, 90); Allies.addTurret(g, def.at.x + 60, def.at.y + 50, 90); }
+    } else if (def.type === 'flares') {
+      // 3 fusées éloignées les unes des autres dans la zone
+      o.flares = []; o.time = def.time;
+      for (let i = 0; i < 80 && o.flares.length < def.n; i++) {
+        const q = World.randomPoint(g.player.x, g.player.y, 150, 2200, 20, def.zone);
+        if (o.flares.every(f => Math.hypot(f.x - q.x, f.y - q.y) > 260)) o.flares.push({ x: q.x, y: q.y, prog: 0, lit: false });
+      }
+    } else if (def.type === 'escort') {
+      const q = World.randomPoint(g.player.x, g.player.y, 380, 1400, 16, def.zone), hp = Math.round(160 * (1 + 0.06 * g.wave.num));
+      o.npc = { x: q.x, y: q.y, vx: 0, vy: 0, r: 11, hp, max: hp, follow: false, flash: 0, role: 'escort', face: 0, stuck: 0 };
+    } else if (def.type === 'airdrop') {
+      // colis largué : se pose au milieu d'une horde, puis se rapporte à la voiture (comme un bidon)
+      const q = World.randomPoint(g.player.x, g.player.y, 350, 1100, 30, def.zone);
+      o.type = 'fetch'; o.item = { x: q.x, y: q.y, kind: 'airdrop', carried: false, drop: true, t: 0, fall: 2.6, landed: false };
     } else { o.at = def.at; o.r = def.r; o.time = def.time; }
     g.objective = o;
     g.showBanner('OBJECTIF', def.name, 2.6, '#ffc21a');
@@ -207,14 +301,59 @@ const Story = {
     if (!o) return;
     if (o.type === 'fetch') {
       const it = o.item;
+      if (it.drop && !it.landed) { // colis en chute : à l'atterrissage, la horde l'entoure
+        it.t += dt;
+        if (it.t >= it.fall) {
+          it.landed = true; Entities.puff(g, it.x, it.y, 10, 22, true); Sfx.play('thud'); g.shake = Math.max(g.shake, 5);
+          const n = 8 + Math.floor(g.wave.num / 2);
+          for (let i = 0; i < n; i++) {
+            const a = i / n * TAU, d = U.rand(70, 130), e = Entities.spawnEnemy(g, Math.random() < 0.7 ? 'basic' : 'fast', it.x + Math.cos(a) * d, it.y + Math.sin(a) * d);
+            World.resolve(e); e.stunT = 1.2;
+          }
+          if (Math.hypot(it.x - p.x, it.y - p.y) < 900) Entities.addText(g, it.x, it.y - 40, 'La horde entoure le colis !', '#ff6a4a', 15);
+        }
+        return;
+      }
       if (!it.carried && !p.inside && Math.hypot(it.x - p.x, it.y - p.y) < p.r + 18) { it.carried = true; Sfx.play('coin'); Entities.addText(g, p.x, p.y - 30, 'Récupéré !', '#ffc21a', 16); }
       if (it.carried) { it.x = p.x; it.y = p.y; if (Math.hypot(MAP.car.x - p.x, MAP.car.y - p.y) < 80) this.completeObjective(g); }
     } else if (o.type === 'defend') {
       if (o.gen.flash > 0) o.gen.flash -= dt;
+      // la survivante répare le générateur en restant à côté (6 % par seconde)
+      o.repairing = !o.failed && g.phase === 'wave' && !p.inside && Math.hypot(o.gen.x - p.x, o.gen.y - p.y) < 95 && o.gen.hp < o.gen.max;
+      if (o.repairing) { o.gen.hp = Math.min(o.gen.max, o.gen.hp + o.gen.max * 0.06 * dt); if (Math.random() < 0.25) Entities.burst(g, o.gen.x, o.gen.y - 10, '#7dff6a', 1, 70, 2, 0.4); }
       if (o.gen.hp <= 0 && !o.failed) {
-        o.failed = true;
+        o.failed = true; g.genFails = (g.genFails || 0) + 1;
         Entities.explode(g, o.gen.x, o.gen.y, 90, 40, { color: '#ffb030' });
-        g.showBanner('GÉNÉRATEUR DÉTRUIT', 'Nouvel essai à la prochaine vague', 2.2, '#ff5a3a');
+        g.showBanner('GÉNÉRATEUR DÉTRUIT', g.genFails >= 2 ? 'Nouvel essai : générateur renforcé + 2 tourelles' : 'Nouvel essai à la prochaine vague, générateur renforcé', 2.6, '#ff5a3a');
+      }
+    } else if (o.type === 'flares') {
+      // fusées de détresse : rester près d'une fusée pendant la vague pour l'allumer
+      for (const f of o.flares) {
+        if (f.lit) { if (Math.random() < 0.25 && g.particles.length < CONFIG.maxParticles) g.particles.push({ x: f.x + U.rand(-3, 3), y: f.y, vx: U.rand(-8, 8), vy: -30, flame: true, color: Math.random() < 0.5 ? '#ff3a2a' : '#ff8a5a', size: U.rand(5, 9), grow: 18, life: 0.7, max: 0.7 }); continue; }
+        const near = g.phase === 'wave' && !p.inside && Math.hypot(f.x - p.x, f.y - p.y) < 55;
+        f.prog = near ? f.prog + dt : Math.max(0, f.prog - dt * 0.5);
+        if (f.prog >= o.time) { f.lit = true; Entities.burst(g, f.x, f.y, '#ff3a2a', 24, 260, 3.5, 0.7); Entities.addText(g, f.x, f.y - 40, '🔥 Fusée allumée !', '#ff8a5a', 16); Sfx.play('objective'); }
+      }
+      if (o.flares.every(f => f.lit)) this.completeObjective(g);
+    } else if (o.type === 'escort') {
+      const n = o.npc;
+      if (n.flash > 0) n.flash -= dt;
+      const wave = g.phase === 'wave';
+      if (!n.follow && wave && !p.inside && Math.hypot(n.x - p.x, n.y - p.y) < 60) { n.follow = true; Entities.addText(g, n.x, n.y - 40, 'Je vous suis !', '#7dff6a', 16); Sfx.play('objective'); }
+      n.vx = n.vy = 0;
+      if (n.follow && wave && !o.failed) { // il suit la survivante (ou attend devant le refuge où elle s'abrite)
+        const tg = p.inside ? World.doorOf(p.inside) : p, dx = tg.x - n.x, dy = tg.y - n.y, d = Math.hypot(dx, dy) || 1;
+        if (d > 46) { const sp = Math.min(205, d * 3); n.vx = dx / d * sp; n.vy = dy / d * sp; n.x += n.vx * dt; n.y += n.vy * dt; World.resolve(n); clampToArena(n); }
+        // coincé derrière un mur : il rejoint la survivante
+        n.stuck = d > 260 && !World.los(n.x, n.y, tg.x, tg.y) ? n.stuck + dt : 0;
+        if (n.stuck > 3) { n.x = tg.x - 30; n.y = tg.y + 20; World.resolve(n); n.stuck = 0; Entities.puff(g, n.x, n.y, 4, 12, true); }
+        if (Math.hypot(MAP.car.x - n.x, MAP.car.y - n.y) < 90) { Entities.addText(g, n.x, n.y - 40, 'Merci, je vous dois la vie !', '#7dff6a', 16); this.completeObjective(g); return; }
+      }
+      if (n.hp <= 0 && !o.failed) {
+        o.failed = true; n.hp = 0;
+        Entities.burst(g, n.x, n.y, '#b8322a', 26, 240, 4, 0.9); Entities.puff(g, n.x, n.y, 8, 18);
+        g.showBanner('LE SURVIVANT EST MORT', 'Un autre survivant attendra à la prochaine vague', 2.6, '#ff5a3a');
+        Sfx.play('death');
       }
     } else if (o.type === 'hold' || o.type === 'repair') {
       const inside = !p.inside && Math.hypot(o.at.x - p.x, o.at.y - p.y) < o.r;

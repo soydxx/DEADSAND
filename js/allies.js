@@ -1,6 +1,6 @@
 'use strict';
 /* =====================================================================
-   ALLIÉS : Rex le chien (débloqué à l'Entraînement), tourelles et
+   ALLIÉS : Rex le chien (débloqué par le niveau de survivante), tourelles et
    barbelés (achetés à l'Atelier des refuges).
    ===================================================================== */
 
@@ -12,12 +12,12 @@ const ALLIES = {
 
 const Allies = {
   init(g) {
-    g.turrets = []; g.traps = [];
-    const lvl = Save.data.perm.dog || 0;
+    g.turrets = []; g.traps = []; g.helpers = []; g.rescues = [];
+    const lvl = dogLevel(); // débloqué par le niveau de survivante (progress.js)
     g.dog = lvl ? { x: g.player.x - 40, y: g.player.y + 20, r: ALLIES.dog.radius, vx: 0, vy: 0, lvl, cd: 0, target: null, biting: 0 } : null;
   },
 
-  addTurret(g, x, y) { const o = { x, y, r: 12 }; World.resolve(o); g.turrets.push({ x: o.x, y: o.y, t: ALLIES.turret.life, cd: 0, aim: 0, fire: 0 }); },
+  addTurret(g, x, y, life) { const o = { x, y, r: 12 }; World.resolve(o); g.turrets.push({ x: o.x, y: o.y, t: life || ALLIES.turret.life, cd: 0, aim: 0, fire: 0 }); },
   addTrap(g, x, y) { g.traps.push({ x, y, r: ALLIES.trap.r, t: ALLIES.trap.life }); },
 
   update(g, dt) {
@@ -44,6 +44,29 @@ const Allies = {
       }
     }
     U.compact(g.traps, t => t.t > 0);
+    this.updateHelpers(g, dt);
+  },
+
+  /** Survivants sauvés (story.js, RESCUE) : suivent la survivante et tirent sur la horde pendant un temps limité */
+  updateHelpers(g, dt) {
+    const p = g.player, R = RESCUE;
+    for (const h of g.helpers || []) {
+      h.t -= dt; h.cd -= dt; if (h.fire > 0) h.fire -= dt;
+      if (h.t <= 0) { Entities.puff(g, h.x, h.y, 6, 14, true); Entities.addText(g, h.x, h.y - 36, 'Bonne chance !', '#3ad6ff', 13); continue; }
+      // place autour de la survivante (de part et d'autre)
+      const a = p.aimAngle + Math.PI + (h.slot % 2 ? 1.2 : -1.2), home = p.inside ? World.doorOf(p.inside) : { x: p.x + Math.cos(a) * 52, y: p.y + Math.sin(a) * 52 };
+      const dx = home.x - h.x, dy = home.y - h.y, d = Math.hypot(dx, dy) || 1, sp = d < 10 ? 0 : Math.min(260, d * 4);
+      h.vx = dx / d * sp; h.vy = dy / d * sp; h.x += h.vx * dt; h.y += h.vy * dt; h.r = 10; World.resolve(h);
+      if (d > 600) { h.x = p.x - 30; h.y = p.y + 20; World.resolve(h); }
+      if (h.cd > 0 || p.inside) continue;
+      const e = Weapons.nearest(g, h.x, h.y, R.helperRange);
+      if (!e || !World.los(h.x, h.y, e.x, e.y)) { h.cd = 0.15; continue; }
+      h.cd = 1 / R.helperRate; h.aim = Math.atan2(e.y - h.y, e.x - h.x); h.fire = 0.08;
+      const r = Weapons.roll(g, R.helperDmg * (1 + 0.05 * g.wave.num));
+      g.pBullets.push({ x: h.x, y: h.y, vx: Math.cos(h.aim) * 640, vy: Math.sin(h.aim) * 640, r: 3.4, dmg: r.dmg, crit: r.crit, pierce: 0, life: R.helperRange / 640, hits: [], kb: 0.5, src: 'ally' });
+      Sfx.play('droneShot');
+    }
+    if (g.helpers) U.compact(g.helpers, h => h.t > 0);
   },
 
   /** Rex suit la survivante, attaque les zombies qui s'approchent, attend devant les refuges */

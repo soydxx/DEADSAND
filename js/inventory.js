@@ -19,13 +19,14 @@ const BINDINGS = {
   slot6:    ['Digit6', '6', 'Case 6'],
   slot7:    ['Digit7', '7', 'Case 7'],
   slot8:    ['Digit8', '8', 'Case 8'],
-  next:     ['KeyR', 'R', 'Arme suivante'],
-  grenade:  ['KeyG', 'G', 'Lancer une grenade (raccourci)'],
-  mine:     ['KeyF', 'F', 'Poser une mine (raccourci)'],
+  next:     ['KeyR', 'R', 'Changer d\'arme (principale / secondaire)'],
+  grenade:  ['KeyG', 'G', 'Létal (grenade, molotov, mine)'],
+  mine:     ['KeyF', 'F', 'Tactique (tourelle, barbelés)'],
   roll:     ['Space', 'Espace', 'Roulade'],
   interact: ['KeyE', 'E', 'Entrer / sortir d\'un refuge'],
   wave:     ['KeyN', 'N', 'Lancer la vague suivante'],
   ability:  ['KeyC', 'C', 'Capacité spéciale du personnage'],
+  build:    ['KeyB', 'B', 'Fortifier (pendant la pause)'],
 };
 
 /** Objets posables (achetés à l'Atelier des refuges) */
@@ -35,11 +36,11 @@ const ITEMS = {
   barrels: { icon: '🛢️', name: 'Fûts piégés ×3' },
 };
 
-const MAIN_WEAPONS = ['rifle', 'shotgun', 'flamer'];
+const MAIN_WEAPONS = ['rifle', 'shotgun', 'flamer']; // familles d'armes principales (modèles 3D)
 
 const Inventory = {
   init(g) {
-    g.active = 'rifle';
+    g.active = 'rifle'; // remplacé par l'arme de la classe (Loadout.equip)
     g.inv = { turret: 0, wire: 0, barrels: 0 };
   },
 
@@ -72,19 +73,22 @@ const Inventory = {
   },
 
   /* ---------------- contenu ---------------- */
-  /** Cases de la barre d'inventaire, dans un ordre stable */
+  /** Cases de la barre d'inventaire : arme principale, létal, tactique, puis objets de l'Atelier */
   slots(g) {
-    const out = [];
-    for (const id of MAIN_WEAPONS) {
-      if (id !== 'rifle' && !g.weapons[id]) continue;
-      if (id === 'rifle' && g.mods && g.mods.shotgun) continue; // règle « Fusil à pompe imposé »
-      const w = g.weapons[id];
-      out.push({ id, kind: 'weapon', icon: id === 'rifle' ? '🔫' : WEAPONS[id].icon, name: id === 'rifle' ? "Fusil d'assaut" : WEAPONS[id].name, active: g.active === id, lvl: w ? w.lvl : 0, evo: w && w.evo });
-    }
-    const gr = g.weapons.grenade;
-    if (gr) out.push({ id: 'grenade', kind: 'mine', icon: WEAPONS.grenade.icon, name: 'Grenade', cd: gr.t > 0 ? gr.t / (gr.cdMax || 1) : 0, lvl: gr.lvl, evo: gr.evo });
-    const m = g.weapons.mines;
-    if (m) out.push({ id: 'mine', kind: 'mine', icon: WEAPONS.mines.icon, name: `Mines (${Weapons.minesMax(g)} max sur le terrain, 30 s)`, cd: g.mines.length >= Weapons.minesMax(g) ? 1 : m.t > 0 ? m.t / (m.cdMax || 1) : 0, lvl: m.lvl, evo: m.evo, extra: `${g.mines.length}/${Weapons.minesMax(g)}` });
+    const out = [], L = g.loadout;
+    if (!L) return out;
+    const P = PRIMARIES[L.primary], pw = g.weapons[P.kind];
+    const sec = g.active === 'secondary';
+    out.push({ id: 'primary', kind: 'weapon', icon: P.icon, name: `${P.name} (arme principale)`, active: !sec, lvl: pw ? pw.lvl : 0, evo: pw && pw.evo });
+    if (g.secondary) { const S = SECONDARIES[g.secondary], sw = g.weapons[g.secondary]; out.push({ id: 'secondary', kind: 'weapon', icon: S.icon, name: `${S.name} (arme secondaire : on court plus vite)`, active: sec, lvl: sw ? sw.lvl : 0 }); }
+    const eq = (slot, wid) => {
+      const w = g.weapons[wid], def = WEAPONS[wid];
+      if (!w) return;
+      const mines = wid === 'mines', max = mines ? Weapons.minesMax(g) : 0;
+      out.push({ id: slot, kind: def.type === 'passive' ? 'item' : 'mine', icon: def.icon, name: def.name + (mines ? ` (${max} max sur le terrain, 30 s)` : def.type === 'passive' ? ' (automatique)' : ''),
+        cd: mines && g.mines.length >= max ? 1 : w.t > 0 ? w.t / (w.cdMax || 1) : 0, lvl: w.lvl, evo: w.evo, extra: mines ? `${g.mines.length}/${max}` : '' });
+    };
+    eq('lethal', L.lethal); eq('tactical', L.tactical);
     for (const [id, it] of Object.entries(ITEMS)) if (g.inv[id] > 0) out.push({ id, kind: 'item', icon: it.icon, name: it.name, count: g.inv[id] });
     return out;
   },
@@ -95,30 +99,19 @@ const Inventory = {
     return i >= 0 && i < 8 ? this.label('slot' + (i + 1)) : '';
   },
 
-  /** Utilise une case : équiper une arme, poser une mine ou un objet */
+  /** Utilise une case : sortir l'arme principale / secondaire, létal, tactique ou objet à poser */
   use(g, id) {
     if (g.state !== 'playing' || !g.player || g.player.inside) return false;
     if (/^slot\d$/.test(id)) { const s = this.slots(g)[Number(id.slice(4)) - 1]; return s ? this.use(g, s.id) : false; }
-    if (MAIN_WEAPONS.includes(id)) return this.equip(g, id);
-    if (id === 'mine') { const ok = Weapons.placeMine(g); if (!ok && g.weapons.mines) Sfx.play('click'); return ok; }
-    if (id === 'grenade') { const ok = Weapons.throwGrenade(g); if (!ok && g.weapons.grenade) Sfx.play('click'); return ok; }
+    if (id === 'primary' || id === 'secondary') return Loadout.swap(g, id);
+    if (id === 'lethal' || id === 'grenade') return Loadout.useLethal(g);
+    if (id === 'tactical' || id === 'mine') return Loadout.useTactical(g);
     if (ITEMS[id]) return this.place(g, id);
     return false;
   },
-  equip(g, id) {
-    if (id !== 'rifle' && !g.weapons[id]) return false;
-    if (id === 'rifle' && g.mods && g.mods.shotgun) return false;
-    if (g.active === id) return true;
-    g.active = id;
-    g.player.fireTimer = 0;
-    Sfx.play('reload');
-    return true;
-  },
-  next(g) {
-    const owned = MAIN_WEAPONS.filter(id => id === 'rifle' || g.weapons[id]);
-    if (owned.length < 2) return;
-    this.equip(g, owned[(owned.indexOf(g.active) + 1) % owned.length]);
-  },
+  equip() { return false; },
+  /** Touche « Changer d'arme » (R, molette, RB) : principale ⇄ secondaire */
+  next(g) { return Loadout.swap(g); },
   /** Pose un objet devant la survivante */
   place(g, id) {
     if (!(g.inv[id] > 0)) return false;
@@ -144,13 +137,5 @@ const Inventory = {
     UI.toast(`${ITEMS[id].icon} ${ITEMS[id].name} dans l'inventaire`, `${this.how(g, id)} pour le poser devant vous`);
   },
   how(g, id) { return Input.mode === 'touch' ? 'Touchez sa case' : `Touche ${this.slotLabel(g, id)} ou cliquez sur sa case`; },
-  /** Nouvelle arme obtenue : on prévient où elle est */
-  announce(g, id) {
-    const def = WEAPONS[id];
-    if (def.type === 'main') UI.toast(`${def.icon} ${def.name} dans l'inventaire`, `${this.how(g, id)} pour l'équiper`);
-    else if (def.type === 'manual') {
-      const slot = id === 'grenade' ? 'grenade' : 'mine', key = Input.mode === 'touch' ? 'Touchez sa case' : `Touche ${this.slotLabel(g, slot)} ou ${this.label(slot)}`;
-      UI.toast(`${def.icon} ${def.name} dans l'inventaire`, `${key} pour ${id === 'grenade' ? 'en lancer une' : 'en poser une'}`);
-    }
-  },
+  announce() {},
 };

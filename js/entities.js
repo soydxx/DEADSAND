@@ -10,6 +10,19 @@
 /** Garde une entité hors des murs/bâtiments et dans le monde */
 function clampToArena(o) { World.resolve(o); }
 
+/** Grimpeur : ignore bâtiments et véhicules (il passe dessus) mais reste dans le monde et les zones ouvertes */
+function climbClamp(o) {
+  const m = MAP.wallT;
+  o.x = U.clamp(o.x, m + o.r, MAP.W - m - o.r); o.y = U.clamp(o.y, m + o.r, MAP.H - m - o.r);
+  const z = World.zoneAt(o.x, o.y);
+  if (!z || !World.isUnlocked(z.id)) World.resolve(o); // pas de raccourci par une zone fermée
+}
+/** Hauteur de ce qui se trouve sous un point (toit, véhicule, mur) : pour les grimpeurs */
+function groundHeightAt(x, y) {
+  for (const o of World.obstacles) if (x > o.x0 && x < o.x1 && y > o.y0 && y < o.y1) return o.kind === 'building' ? (o.ref.h || 80) : o.kind === 'prop' ? 26 : o.kind === 'car' ? 22 : 36;
+  return 0;
+}
+
 /** Un projectile sort-il du monde ou touche-t-il un obstacle ? */
 function outOfArena(o) { return World.solidAt(o.x, o.y); }
 
@@ -38,13 +51,40 @@ function pushOut(o, b, minD) {
 /* ---------------- Comportements ennemis (clé = ENEMY_TYPES[x].behavior) ---------------- */
 const BEHAVIORS = {
   // Fonce sur le joueur (option wobble : trajectoire en zigzag)
+  // IA : certains contournent par le côté (flank), les coureurs attendent d'être en meute pour charger (pack)
   chase(e, g, dt) {
-    const s = seek(e, g, dt);
-    let a = Math.atan2(s.ny, s.nx);
-    if (e.def.wobble && e.los) a += Math.sin(e.age * 6 + e.phase) * 0.55;
-    const sp = e.speed * (e.slowT > 0 ? ALLIES.trap.slow : 1);
+    const s = seek(e, g, dt), p = g.player;
+    let a = Math.atan2(s.ny, s.nx), mult = 1;
+    // contournement : arrive en arc de cercle par le côté ou par derrière, puis fonce quand il est proche
+    if (e.flank && e.los && s.d > 150) a += e.flank * 1.05 * U.clamp((s.d - 150) / 260, 0, 1);
+    // meute : un coureur seul rôde à distance jusqu'à ce que d'autres le rejoignent, puis tous chargent
+    if (e.pack && !p.inside) {
+      if (e.charging) { mult = 1.35; if (s.d < 50 || !e.los) e.charging = false; }
+      else if (e.los && s.d < 430 && s.d > 140) {
+        e.packT = (e.packT || 0) - dt;
+        if (e.packT <= 0) { e.packT = 0.3; e.mates = 0; for (const o of g.enemies) if (o !== e && o.pack && !o.dead && Math.abs(o.x - e.x) < 150 && Math.abs(o.y - e.y) < 150) e.mates++; }
+        e.waitT = (e.waitT || 0) + dt;
+        if (e.mates >= 2 || e.waitT > 3) { // la meute est là (ou il a trop attendu) : charge générale
+          e.charging = true; e.waitT = 0;
+          for (const o of g.enemies) if (o.pack && !o.dead && !o.charging && Math.hypot(o.x - e.x, o.y - e.y) < 180) { o.charging = true; o.waitT = 0; }
+          if (e.mates >= 2 && (g.packCry = (g.packCry || 0)) < g.time - 2) { g.packCry = g.time; Entities.addText(g, e.x, e.y - 30, 'LA MEUTE CHARGE !', '#ffb030', 14); Sfx.groanAt(0.25, 1.3); }
+        } else { a += Math.PI / 2 * (e.phase > 5 ? 1 : -1); mult = 0.45; } // rôde en tournant autour
+      }
+    }
+    if (e.def.wobble && e.los && !e.charging) a += Math.sin(e.age * 6 + e.phase) * 0.55;
+    const sp = e.speed * mult * (e.slowT > 0 ? ALLIES.trap.slow : 1);
     e.vx = Math.cos(a) * sp;
     e.vy = Math.sin(a) * sp;
+  },
+
+  // Grimpeur : va droit sur la survivante en passant par-dessus bâtiments et véhicules (hors d'atteinte sur les toits)
+  climber(e, g, dt) {
+    const t = Entities.targetOf(g, e), dx = t.x - e.x, dy = t.y - e.y, d = Math.hypot(dx, dy) || 1;
+    e.ht = (e.ht || 0) - dt;
+    if (e.ht <= 0) { e.ht = 0.1; e.climbH = groundHeightAt(e.x, e.y); }
+    const sp = e.speed * (e.climbH > 0 ? 0.75 : 1) * (e.slowT > 0 ? ALLIES.trap.slow : 1); // plus lent quand il escalade
+    e.vx = dx / d * sp; e.vy = dy / d * sp;
+    e.los = !e.climbH && World.los(e.x, e.y, t.x, t.y);
   },
 
   // Hurleur : garde ses distances et hurle régulièrement (accélère les zombies proches)
@@ -205,13 +245,60 @@ Object.assign(BEHAVIORS, {
       Sfx.play('splat'); g.shake = Math.max(g.shake, 3);
     }
   },
+
+  // Le Brûleur : bombes incendiaires lancées vers la survivante (elles retombent en brasier), traînée de feu
+  burner(e, g, dt) {
+    const p = g.player, s = seek(e, g, dt), enraged = e.hp < e.maxHp * 0.5;
+    e.vx = s.nx * e.speed * (enraged ? 1.3 : 1); e.vy = s.ny * e.speed * (enraged ? 1.3 : 1);
+    e.trail = (e.trail || 0) - dt;
+    if (e.trail <= 0 && (g.acid = g.acid || []).length < 30) { e.trail = enraged ? 0.35 : 0.6; g.acid.push({ x: e.x, y: e.y, r: 26, t: 3.5, max: 3.5, tick: 0, fire: true }); }
+    e.cooldown -= dt;
+    if (e.cooldown <= 0 && e.los && !p.inside && s.d < 520) {
+      e.cooldown = e.def.fireCooldown * (enraged ? 0.65 : 1);
+      const n = enraged ? 5 : 3;
+      for (let i = 0; i < n; i++) {
+        const tx = p.x + U.rand(-70, 70), ty = p.y + U.rand(-70, 70), a = Math.atan2(ty - e.y, tx - e.x), d = Math.hypot(tx - e.x, ty - e.y);
+        shootEnemyBullet(g, e, a, e.def.bulletSpeed, e.bulletDamage);
+        const b = g.eBullets[g.eBullets.length - 1]; b.acid = true; b.fire = true; b.life = d / e.def.bulletSpeed; b.r = 7;
+      }
+      Sfx.play('throw'); g.shake = Math.max(g.shake, 3);
+    }
+  },
+
+  // L'Abomination : avance, s'arrête et frappe le sol (cercle d'avertissement 0,8 s), puis onde de choc
+  abomination(e, g, dt) {
+    const p = g.player, D = e.def, enraged = e.hp < e.maxHp * 0.5;
+    if (e.slamT > 0) { // préparation du coup : immobile
+      e.vx = e.vy = 0; e.slamT -= dt;
+      if (Math.random() < 0.5) Entities.puff(g, e.x + U.rand(-D.slamRadius, D.slamRadius) * 0.7, e.y + U.rand(-D.slamRadius, D.slamRadius) * 0.7, 1, 10, true);
+      if (e.slamT <= 0) {
+        g.fx.push({ t: 'ring', x: e.x, y: e.y, r: D.slamRadius }); g.shake = Math.max(g.shake, 18); Sfx.play('boom');
+        Entities.puff(g, e.x, e.y, 12, 30, true);
+        if (!p.inside && Math.hypot(p.x - e.x, p.y - e.y) < D.slamRadius + p.r) {
+          Entities.hurtPlayer(g, D.slamDamage * WAVE_CONFIG.damageMult(g.wave.num), Entities.blow('slam', e.type));
+          const dx = p.x - e.x, dy = p.y - e.y, d = Math.hypot(dx, dy) || 1; p.x += dx / d * 40; p.y += dy / d * 40; World.resolve(p);
+        }
+        if (enraged) for (let i = 0; i < 2; i++) { const a = Math.random() * TAU; g.wave.addWarning('crawler', e.x + Math.cos(a) * 80, e.y + Math.sin(a) * 80, 0.6); }
+        e.slamCd = D.slamEvery * (enraged ? 0.7 : 1);
+      }
+      return;
+    }
+    const s = seek(e, g, dt);
+    e.vx = s.nx * e.speed * (enraged ? 1.25 : 1); e.vy = s.ny * e.speed * (enraged ? 1.25 : 1);
+    e.slamCd = (e.slamCd == null ? 2.5 : e.slamCd) - dt;
+    if (e.slamCd <= 0 && s.d < D.slamRadius + 40 && !p.inside) {
+      e.slamT = 0.8; Sfx.play('groan');
+      Entities.addText(g, e.x, e.y - e.r * 2, '⚠ ONDE DE CHOC', '#ff6a4a', 16);
+      g.fx.push({ t: 'ring', x: e.x, y: e.y, r: D.slamRadius });
+    }
+  },
 });
 
 function shootEnemyBullet(g, e, angle, speed, dmg) {
   g.eBullets.push({
     x: e.x + Math.cos(angle) * e.r, y: e.y + Math.sin(angle) * e.r,
     vx: Math.cos(angle) * speed, vy: Math.sin(angle) * speed,
-    r: 6, dmg, life: 6, color: e.def.bulletColor || '#ffb347', acid: !!e.def.acid,
+    r: 6, dmg, life: 6, color: e.def.bulletColor || '#ffb347', acid: !!e.def.acid, from: e.type,
   });
 }
 
@@ -224,7 +311,10 @@ const Entities = {
     const o = g.objective;
     if (o && o.type === 'defend' && !o.failed) {
       const dg = Math.hypot(o.gen.x - e.x, o.gen.y - e.y), dp = Math.hypot(t.x - e.x, t.y - e.y);
-      if (dg < 300 && dg < dp) t = o.gen;
+      if (dg < 200 && dg < dp * 0.8) t = o.gen; // seuls les zombies vraiment proches du générateur s'en prennent à lui
+    } else if (o && o.type === 'escort' && !o.failed && o.npc.follow) {
+      const dn = Math.hypot(o.npc.x - e.x, o.npc.y - e.y), dp = Math.hypot(t.x - e.x, t.y - e.y);
+      if (dn < 170 && dn < dp * 0.8) t = o.npc; // survivant escorté : la horde s'en prend à lui s'il est plus près
     }
     return t;
   },
@@ -260,8 +350,13 @@ const Entities = {
       cooldown: def.fireCooldown ? def.fireCooldown * U.rand(0.5, 1) : 0,
       phase: Math.random() * 10, age: 0, flash: 0, dead: false,
     };
-    clampToArena(e);
+    if (!def.climb) clampToArena(e);
     if (g.mods && g.mods.fast) e.speed *= 1.3; // modificateur : zombies enragés
+    // IA : les coureurs chassent en meute (vague 4+), certains zombies contournent par le côté (vague 6+)
+    if (def.behavior === 'chase' && !def.boss && !g.tut) {
+      if (typeId === 'fast' && w >= 4) e.pack = true;
+      else if (w >= 6 && Math.random() < 0.3 && typeId !== 'tank' && typeId !== 'shield') e.flank = Math.random() < 0.5 ? -1 : 1;
+    }
     if (def.burrow) { e.burrowed = true; (g.burrowers = g.burrowers || []).push(e); return e; } // Enfouisseur : sous le sable
     g.enemies.push(e);
     Entities.burst(g, e.x, e.y, '#d9b273', ENEMY_TYPES[typeId].boss ? 30 : 8, 150, ENEMY_TYPES[typeId].boss ? 5 : 3, 0.45);
@@ -300,7 +395,7 @@ const Entities = {
       p.vx = p.rollDirX * sp; p.vy = p.rollDirY * sp;
       if (Math.random() < 0.5) Entities.rollTrail(g, p.x, p.y + p.r * 1.3, 1, 7);
     } else {
-      const hs = Fun.speedMult(g);
+      const hs = Fun.speedMult(g) * Loadout.speedMult(g) * Forts.slowOf(g, p); // arme secondaire : plus vite ; barricade enjambée : plus lent
       p.vx = m.x * p.speed * carry * hs; p.vy = m.y * p.speed * carry * hs;
     }
     p.x += p.vx * dt; p.y += p.vy * dt;
@@ -317,11 +412,17 @@ const Entities = {
     // Tir : sur la cible verrouillée (zombie ou fût) si elle est à portée et visible,
     // sinon automatiquement sur le zombie visible le plus proche
     p.fireTimer -= dt;
-    const w = p.weapon;
-    let target = null, best = w.range * w.range;
     const L = g.lock;
     if (L && (L.dead || (L.fuse != null) || (L.hp != null && L.hp <= 0 && !L.def))) g.lock = null;
-    if (g.active && g.active !== 'rifle') return; // fusil à pompe / lance-flammes équipé : géré par weapons.js
+    if (g.swapT > 0) { // changement d'arme : on ne tire pas pendant un court instant
+      g.swapT -= dt; if (p.fireTimer < 0) p.fireTimer = 0;
+      if (m.x || m.y) p.aimAngle = Math.atan2(m.y, m.x);
+      return;
+    }
+    const sec = g.active === 'secondary';
+    if (g.active && g.active !== 'rifle' && !sec) return; // fusil à pompe / lance-flammes équipé : géré par weapons.js
+    const w = sec ? Loadout.secWeapon(g) : p.weapon;
+    let target = null, best = w.range * w.range;
     if (g.lock && U.dist2(p.x, p.y, L.x, L.y) < (w.range * 1.3) ** 2 && World.los(p.x, p.y, L.x, L.y)) target = L;
     if (!target) for (const e of g.enemies) {
       if (e.dead) continue;
@@ -329,7 +430,7 @@ const Entities = {
       if (d2 < best && World.los(p.x, p.y, e.x, e.y)) { best = d2; target = e; }
     }
     if (target) {
-      if (p.fireTimer <= 0) { Entities.fire(g, p, target); p.fireTimer += 1 / (w.fireRate * Fun.rateMult(g)); g.shake = Math.max(g.shake, 1.2); }
+      if (p.fireTimer <= 0) { Entities.fire(g, p, target, w, sec ? g.secondary : null); p.fireTimer += 1 / (w.fireRate * Fun.rateMult(g)); g.shake = Math.max(g.shake, 1.2); }
       if (p.fireTimer < 0) p.fireTimer = 0;
     } else {
       if (p.fireTimer < 0) p.fireTimer = 0;
@@ -337,21 +438,22 @@ const Entities = {
     }
   },
 
-  fire(g, p, t) {
-    const w = p.weapon;
+  /** w : réglages du tir (fusil ou arme secondaire) ; src : arme secondaire tenue (statistiques de fin de partie) */
+  fire(g, p, t, w = p.weapon, src = null) {
     const d = Math.sqrt(U.dist2(p.x, p.y, t.x, t.y));
     const tt = d / w.projSpeed * 0.8;
     const base = Math.atan2(t.y + (t.vy || 0) * tt - p.y, t.x + (t.vx || 0) * tt - p.x);
     p.aimAngle = base;
     const n = w.projCount, life = w.range * 1.15 / w.projSpeed;
     for (let i = 0; i < n; i++) {
-      const a = base + (i - (n - 1) / 2) * w.spread;
+      const a = base + (i - (n - 1) / 2) * w.spread + (w.jitter ? U.rand(-w.jitter, w.jitter) : 0);
       const crit = Math.random() < w.critChance;
       g.pBullets.push({
         x: p.x, y: p.y,
         vx: Math.cos(a) * w.projSpeed, vy: Math.sin(a) * w.projSpeed,
         r: w.projRadius * (crit ? 1.25 : 1), dmg: w.damage * (crit ? w.critMult : 1), crit,
-        pierce: w.pierce, life, hits: [],
+        pierce: w.pierce, life, hits: [], src: src || undefined, flare: w.flare || undefined,
+        kb: src ? w.knockback / (p.weapon.knockback || 1) : undefined,
       });
     }
     // douille éjectée sur le côté
@@ -360,16 +462,31 @@ const Entities = {
       g.particles.push({ x: p.x, y: p.y, vx: Math.cos(s) * U.rand(50, 90), vy: Math.sin(s) * U.rand(50, 90),
         casing: true, z: 22, vz: U.rand(80, 140), color: '#e8b84a', size: 2.2, life: 1.4, max: 1.4 });
     }
-    Sfx.play('shoot');
+    Sfx.play((src && SECONDARIES[src].sfx) || 'shoot');
   },
 
-  hurtPlayer(g, dmg) {
+  /** Origine d'un coup reçu, pour la cause de la mort : { k: clé, n: texte, ic: icône } */
+  blow(kind, type) {
+    const nm = type && ENEMY_TYPES[type] ? ENEMY_TYPES[type].name : 'Zombie', boss = type && ENEMY_TYPES[type] && ENEMY_TYPES[type].boss;
+    if (kind === 'melee') return { k: 'melee_' + type, n: `${nm} · corps à corps`, ic: boss ? '💀' : '🧟' };
+    if (kind === 'spit') return { k: 'spit_' + type, n: `${nm} · ${type === 'spewer' ? 'jet de bile' : type === 'burner' ? 'bombe incendiaire' : 'crachat'}`, ic: boss ? '💀' : '🤢' };
+    if (kind === 'slam') return { k: 'slam_' + type, n: `${nm} · onde de choc`, ic: '💀' };
+    return { boom: { k: 'kamikaze', n: 'Explosion d\'un Kamikaze', ic: '💥' }, barrel: { k: 'barrel', n: 'Explosion d\'un fût', ic: '🛢️' }, acid: { k: 'acid', n: 'Flaque d\'acide', ic: '🧪' }, fire: { k: 'fire', n: 'Brasier du Brûleur', ic: '🔥' } }[kind] || { k: 'unknown', n: 'La horde', ic: '🧟' };
+  },
+
+  hurtPlayer(g, dmg, src) {
     const p = g.player;
     if (p.invuln > 0 || p.rollT > 0 || p.inside || g.state !== 'playing') return;
     Fun.onHurt(g);
     if (p.shieldT > 0) dmg *= 0.2; // Bouclier de Brick
     const d = Math.max(1, Math.round(dmg - p.armor));
     p.hp -= d;
+    // dégâts subis par origine (bilan de fin de partie) et dernier coup reçu
+    const b = src || this.blow();
+    g.lastBlow = b;
+    const H = g.stats.hurtBy || (g.stats.hurtBy = {});
+    (H[b.k] = H[b.k] || { n: b.n, ic: b.ic, d: 0 }).d += Math.min(d, p.hp + d);
+    if (g.tut && p.hp < 1) p.hp = 1; // tutoriel : on ne peut pas mourir
     p.invuln = CONFIG.player.invulnTime;
     g.shake = Math.max(g.shake, 9);
     g.hurtFlash = 0.3;
@@ -385,12 +502,14 @@ const Entities = {
   updateEnemies(g, dt) {
     const p = g.player, list = g.enemies;
     const o = g.objective, gen = o && o.type === 'defend' && !o.failed ? o.gen : null;
+    const esc = o && o.type === 'escort' && !o.failed && o.npc.follow ? o.npc : null;
     for (const e of list) {
       e.age += dt;
       if (e.flash > 0) e.flash -= dt;
       if (e.slowT > 0) e.slowT -= dt;
       BEHAVIORS[e.def.behavior](e, g, dt);
-      if (gen && Math.hypot(gen.x - e.x, gen.y - e.y) < e.r + 30) { gen.hp -= e.damage * 0.8 * dt; gen.flash = 0.08; }
+      if (gen && Math.hypot(gen.x - e.x, gen.y - e.y) < e.r + 30) { gen.hp -= e.damage * (e.def.boss ? 0.6 : 0.4) * dt; gen.flash = 0.08; }
+      if (esc && Math.hypot(esc.x - e.x, esc.y - e.y) < e.r + 14) { esc.hp -= e.damage * 0.9 * dt; esc.flash = 0.08; }
       if (e.dead) continue;
       // modificateurs de vitesse : dernier carré enragé, cri du Hurleur, aveuglé (capacité de Mia)
       if (e.enraged) { e.vx *= 1.7; e.vy *= 1.7; }
@@ -429,7 +548,9 @@ const Entities = {
         }
         pushOut(e, b, e.r + b.r);
       }
-      clampToArena(e);
+      if (e.def.climb) climbClamp(e); else clampToArena(e); // les grimpeurs passent sur les toits
+      Forts.updateEnemy(g, e, dt); // barricades : les zombies tapent dedans
+      if (e.bashing > 0) { e.bashing -= dt; e.stillT = 0; e.ax = e.x; e.ay = e.y; } // occupé à casser une barricade : pas « coincé »
       // filet de sécurité : un zombie immobile depuis 10 s (coincé quelque part) est replacé plus près
       if (e.ax == null || Math.hypot(e.x - e.ax, e.y - e.ay) > 30) { e.ax = e.x; e.ay = e.y; e.stillT = 0; }
       else if ((e.stillT += dt) > 10 && !e.los && !p.inside && g.phase === 'wave' && !(gen && Math.hypot(gen.x - e.x, gen.y - e.y) < e.r + 50)) {
@@ -437,7 +558,7 @@ const Entities = {
         e.x = q.x; e.y = q.y; e.ax = e.x; e.ay = e.y; e.stillT = 0;
       }
       const rr = e.r + p.r * 0.85;
-      if (e.damage > 0 && !p.inside && U.dist2(e.x, e.y, p.x, p.y) < rr * rr) Entities.hurtPlayer(g, e.damage);
+      if (e.damage > 0 && !p.inside && U.dist2(e.x, e.y, p.x, p.y) < rr * rr) Entities.hurtPlayer(g, e.damage, Entities.blow('melee', e.type));
     }
     U.compact(list, e => !e.dead);
   },
@@ -468,6 +589,7 @@ const Entities = {
     Fun.onKill(g, e, k);
     const def = e.def, p = g.player;
     g.stats.kills++;
+    Progress.onWeaponKill(g, k.src, k.crit); // niveau d'arme et défis de camouflage
     g.stats.score += def.score * (e.elite ? 4 : 1);
     if (e.def.boss) g.stats.bosses++;
     if (e.elite) g.stats.elites++;
@@ -495,10 +617,16 @@ const Entities = {
       else if (r < pc.medkit.chance + pc.magnet.chance) Entities.dropPowerup(g, e.x, e.y, 'magnet');
       else if (r < pc.medkit.chance + pc.magnet.chance + pc.bomb.chance) Entities.dropPowerup(g, e.x, e.y, 'bomb');
     }
+    // L'Abomination : se divise en brutes et en coureurs
+    if (def.splits) for (const [t, n] of Object.entries(def.splits)) for (let i = 0; i < n; i++) {
+      const a = Math.random() * TAU, d = U.rand(30, 90), s = Entities.spawnEnemy(g, t, e.x + Math.cos(a) * d, e.y + Math.sin(a) * d);
+      World.resolve(s); s.stunT = 0.5; s.kbx = Math.cos(a) * 300; s.kby = Math.sin(a) * 300;
+    }
+    if (def.splits) Entities.addText(g, e.x, e.y - 60, 'ELLE SE DIVISE !', '#c77dff', 22);
     // kamikaze : explose (même s'il est abattu à distance)
     if (def.explodeRadius) {
       Entities.explode(g, e.x, e.y, def.explodeRadius, def.explodeDamage * WAVE_CONFIG.damageMult(g.wave.num) * 2.5,
-        { hurtPlayer: true, playerDamage: def.explodeDamage * WAVE_CONFIG.damageMult(g.wave.num), color: '#ff8a3a' });
+        { hurtPlayer: true, playerDamage: def.explodeDamage * WAVE_CONFIG.damageMult(g.wave.num), color: '#ff8a3a', blow: 'boom' });
     }
     const big = e.def.boss || e.type === 'tank' || e.elite;
     Entities.puff(g, e.x, e.y, big ? 9 : 5, e.r * 1.1);
@@ -536,6 +664,7 @@ const Entities = {
   /** Dégâts de zone (zombies, fûts en chaîne, joueur si opts.hurtPlayer) + effets */
   explode(g, x, y, r, dmg, opts = {}) {
     const k0 = g.stats.kills;
+    if (!opts.hurtPlayer && g.player && g.player.demoMult) dmg *= g.player.demoMult; // atout Démolition (pas les kamikazes)
     for (const e of g.enemies) {
       if (e.dead) continue;
       const d = Math.hypot(e.x - x, e.y - y);
@@ -547,7 +676,9 @@ const Entities = {
       if (b.fuse == null && Math.hypot(b.x - x, b.y - y) < r + b.r) b.fuse = 0.14;
     }
     const p = g.player;
-    if (opts.hurtPlayer && p && Math.hypot(p.x - x, p.y - y) < r + p.r) Entities.hurtPlayer(g, opts.playerDamage || dmg * 0.3);
+    if (opts.hurtPlayer && p && Math.hypot(p.x - x, p.y - y) < r + p.r) Entities.hurtPlayer(g, opts.playerDamage || dmg * 0.3, Entities.blow(opts.blow || 'barrel'));
+    const ob = g.objective, nc = ob && ob.type === 'escort' && !ob.failed && ob.npc.follow ? ob.npc : null; // le survivant escorté souffre aussi des explosions
+    if (opts.hurtPlayer && nc && Math.hypot(nc.x - x, nc.y - y) < r + nc.r) { nc.hp -= (opts.playerDamage || dmg * 0.3) * 1.5; nc.flash = 0.1; }
     // effets
     g.fx.push({ t: 'ring', x, y, r });
     g.fx.push({ t: 'decal', x, y, r: r * 0.55, color: '#2a221a' });
@@ -624,6 +755,8 @@ const Entities = {
         }
         Entities.damageEnemy(g, e, bd, b.crit && !blocked, b.vx / sp * kb * (blocked ? 0.2 : 1), b.vy / sp * kb * (blocked ? 0.2 : 1), { src: b.src || (b.pellet ? 'shotgun' : b.drone ? 'drone' : 'rifle'), noText: blocked });
         if (blocked) { b.life = 0; break; }
+        // fusée du lance-fusées : enflamme le sol à l'impact
+        if (b.flare && g.fireZones.length < 30) { g.fireZones.push({ x: e.x, y: e.y, r: 36, t: 2.5, max: 2.5, dps: b.dmg * 0.7, tick: 0 }); b.life = 0; Sfx.play('boom'); break; }
         if (Fun.on(g, 'explosive') && (!b.pellet || Math.random() < 0.34)) Fun.miniBoom(g, b.x, b.y, b.dmg * 0.6);
         Entities.star(g, b.x, b.y, b.crit ? 1.1 : 0.7, b.crit ? '#ffd24a' : '#ffffff');
         Entities.burst(g, b.x, b.y, e.def.color, 3, 120, 2.5, 0.25);
@@ -640,11 +773,11 @@ const Entities = {
       if (splat) b.life = 0;
       if (b.life > 0) {
         const rr = b.r + p.r * 0.8;
-        if (!p.inside && U.dist2(b.x, b.y, p.x, p.y) < rr * rr && p.invuln <= 0 && p.rollT <= 0) { b.life = 0; splat = true; Entities.hurtPlayer(g, b.dmg); }
+        if (!p.inside && U.dist2(b.x, b.y, p.x, p.y) < rr * rr && p.invuln <= 0 && p.rollT <= 0) { b.life = 0; splat = true; Entities.hurtPlayer(g, b.dmg, Entities.blow('spit', b.from)); }
       }
       // crachat de bile : éclaboussure verdâtre au sol à l'impact
       // bile de la Gerbeuse : laisse une flaque acide (ou en fin de course)
-      if (b.acid && (splat || b.life <= 0) && (g.acid = g.acid || []).length < 24) g.acid.push({ x: b.x, y: b.y, r: 30, t: 5, max: 5, tick: 0 });
+      if (b.acid && (splat || b.life <= 0) && (g.acid = g.acid || []).length < (b.fire ? 34 : 24)) g.acid.push({ x: b.x, y: b.y, r: b.fire ? 40 : 30, t: b.fire ? 4 : 5, max: b.fire ? 4 : 5, tick: 0, fire: !!b.fire });
       if (splat) {
         g.fx.push({ t: 'decal', x: b.x, y: b.y, r: b.r * 2.4, color: '#5a6a1a' });
         Entities.burst(g, b.x, b.y, '#8a9a2a', 6, 120, 3, 0.35);
@@ -656,7 +789,7 @@ const Entities = {
     if (g.acid) {
       for (const a of g.acid) {
         a.t -= dt; a.tick -= dt;
-        if (a.tick <= 0 && !p.inside && Math.hypot(p.x - a.x, p.y - a.y) < a.r + p.r * 0.5) { a.tick = 0.45; Entities.hurtPlayer(g, 5); }
+        if (a.tick <= 0 && !p.inside && Math.hypot(p.x - a.x, p.y - a.y) < a.r + p.r * 0.5) { a.tick = 0.45; Entities.hurtPlayer(g, a.fire ? 7 : 5, Entities.blow(a.fire ? 'fire' : 'acid')); }
       }
       U.compact(g.acid, a => a.t > 0);
     }
@@ -672,7 +805,7 @@ const Entities = {
   collectPowerup(g, c) {
     const p = g.player, pc = CONFIG.powerups;
     if (c.kind === 'medkit') {
-      const h = Math.min(pc.medkit.heal, p.maxHp - p.hp);
+      const h = Math.min(pc.medkit.heal * (p.healMult || 1), p.maxHp - p.hp); // Nora la médecin : ×1,5
       p.hp += h;
       Entities.addText(g, p.x, p.y - p.r - 10, `+${Math.round(h)} PV`, '#7dff6a', 18);
       Sfx.play('heal');
@@ -718,7 +851,7 @@ const Entities = {
       if (!c.dead && U.dist2(c.x, c.y, p.x, p.y) < (p.r + c.r) * (p.r + c.r)) {
         c.dead = true;
         if (isCoin) {
-          let v = c.value * (p.scrapMult || 1) * Fun.scrapMult(g); // la série multiplie la ferraille
+          let v = c.value * (p.scrapMult || 1) * Fun.scrapMult(g) * (g.scrapScale || 1); // série ; moins de ferraille en fin de partie
           g.coins += Math.floor(v) + (Math.random() < v % 1 ? 1 : 0);
           Sfx.play('coin');
         } else Entities.collectPowerup(g, c);

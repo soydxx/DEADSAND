@@ -29,7 +29,7 @@ toujours revérifié, modèles 3D et Three.js mis en cache) et les types MIME.
 ## Contrôles
 | | Déplacement | Ciblage | Roulade | Autres |
 |---|---|---|---|---|
-| PC | ZQSD / WASD / flèches | clic sur un zombie ou un fût · clic droit / Tab pour relâcher | Espace ou Maj | 1-2-3 armes · R / molette arme suivante · G grenade (vers la souris) · F mine · 4-5-6 objets · E refuge · N vague · Échap pause |
+| PC | ZQSD / WASD / flèches | clic sur un zombie ou un fût · clic droit / Tab pour relâcher | Espace ou Maj | 1 arme principale · 2 arme secondaire · R / molette changer d'arme · G létal (vers la souris) · F tactique · 5-6-7 objets · E refuge · N vague · Échap pause |
 | Mobile | pouce à gauche | toucher un zombie ou un fût (moitié droite) | bouton 🌀 | inventaire à droite · boutons « Entrer » et « ▶ Vague » |
 
 Toutes les touches se changent dans **Options → Touches** (`BINDINGS` dans inventory.js).
@@ -37,18 +37,117 @@ Toutes les touches se changent dans **Options → Touches** (`BINDINGS` dans inv
 Le tir reste automatique : sans cible verrouillée, la survivante vise le zombie visible le
 plus proche. Une cible verrouillée est prioritaire (portée ×1,3) et les grenades la visent.
 
-**Inventaire** (barre en bas, à droite sur mobile) : fusil d'assaut, fusil à pompe et
-lance-flammes s'équipent (un seul tire à la fois) ; les mines se posent avec leur touche
-(temps de recharge) ; tourelles, barbelés et fûts achetés à l'Atelier des refuges se posent
-devant vous, où vous voulez. Grenades et drone restent automatiques.
+**Inventaire** (barre en bas) : arme principale (case 1), arme secondaire (case 2 : touchez-la pour changer d'arme),
+létal et tactique (temps de recharge), puis tourelles, barbelés et fûts achetés à l'Atelier des refuges, à poser devant vous.
 
 **Roulade** : courte, avec une jauge d'endurance de 3 charges (sous la survivante) qui se
 recharge en ~1 s par charge (`CONFIG.roll`).
 
+## Classes (création de classe, `js/loadout.js`)
+Avant la partie, onglet **Classes** de la Préparation : « Classe 1 » toute prête, et un bouton « + » pour en créer\njusqu'à 5 (nommables, supprimables), chacune avec
+- une **arme principale** : fusil d'assaut, fusil à pompe (niv. 1), mitraillette (3), fusil de précision (8), lance-flammes (12) ;
+- une **arme secondaire** (touche 2 ou R, molette) : pistolet (1), revolver (5), pistolet-mitrailleur (7), lance-fusées (10).
+  Changer d'arme prend 0,3 s ; avec la secondaire en main, on court 10 à 15 % plus vite (SECONDARIES). Niveaux 1→5 à l'établi ;
+- un **létal** (touche G) : grenades (1), cocktail Molotov (3), mines (5) ;
+- un **tactique** (touche F) : drone (1), tourelle portable (4), barbelés portables (9) ;
+- **3 atouts** (bleu / rouge / jaune), débloqués eux aussi par le niveau de survivante.
+En partie, les **établis** (un par zone) améliorent l'arme principale (pièces ; « Calibre » / « Pression » pour le pompe et
+le lance-flammes, dont le dernier niveau est l'évolution) et l'équipement (onglet Équipement : niveaux 1→5 puis évolution).
+Il n'y a plus d'Armurerie ni d'achat d'armes en partie.
+
+Les bonus de dégâts de l'équipement (grenades, drone…) ne dépendent plus des dégâts propres de l'arme principale
+(p.dmgBase) : les grenades du fusil de précision faisaient ×3,5, celles de la mitraillette ×0,5.
+
+## Tutoriel (js/tutorial.js)
+Bouton « 🎓 Tutoriel » sur l'écran titre et dans la Préparation. Partie guidée d'environ 2 minutes sur le parking, en 9 étapes :
+bouger, tir automatique, cibler un fût, roulade, létal, arme secondaire, établi, refuge, petite horde. Pas de vagues
+(phase = 'tut'), impossible de mourir, pas d'XP ni de record. Flèche jaune vers l'endroit où aller. 150 🔩 la première fois.
+
+## Cause de la mort
+En fin de partie : le dernier coup reçu (zombie et type d'attaque, kamikaze, fût, acide), le nombre de zombies autour,
+la part des dégâts subis par origine (stats.hurtBy) et un conseil. Les causes sont cumulées dans Save.data.deathBy.
+
+**Économie** : ferraille des zombies réduite de 5 % par vague après la vague 8 (`CONFIG.scrapFade`), prime de fin de vague
+plafonnée à la vague 12, série ×1,5 max, pièces et équipement plus chers. Ravitaillements : 30 % des événements, 2 colis,
++12 PV / +15 🔩 (`STORY.supply`).
+## Objectifs variés, vagues spéciales, survivants (`js/story.js`)
+- **Objectifs tirés au hasard** : les 4 étapes (vagues 3, 7, 12, 16) gardent leur zone et leur pièce, mais le type change à
+  chaque partie (`OBJECTIVES[].pool`, `OBJ_TYPES`, sans doublon) : bidon / batterie, générateur, station-service, et 3 nouveaux :
+  - **Fusées de détresse** : en allumer 3 en restant 2,5 s à côté de chacune, pendant la vague ;
+  - **Escorte** : un survivant à rejoindre pendant la vague ; il vous suit, la horde s'en prend à lui ; à ramener à la voiture
+    (s'il meurt, un autre attend à la vague suivante) ;
+  - **Colis largué** : tombe en parachute au milieu d'une horde, à rapporter à la voiture.
+- **Vagues spéciales** (prime de fin de vague ×1,5) : *Coureurs* (vague 5+, que des coureurs et des rampants),
+  *Panne de courant* (vague 6+, nuit sans lampe torche ni lampadaires), *Double boss* (vagues de boss à partir de la 20).
+- **Survivants à sauver** (`RESCUE`) : à partir de la vague 3, 40 % des vagues ; un survivant appelle à l'aide (flèche bleue, 45 s).
+  Rejoint, il donne de la ferraille ou se bat à vos côtés pendant 45 s (`Allies.updateHelpers`).
+
+## Progression des armes et prestige (`js/progress.js`)
+- **Niveau d'arme** (1 → 10, `WLEVELS`) : chaque arme principale ou secondaire monte avec ses éliminations, cumulées
+  d'une partie à l'autre (celles de la partie en cours comptent tout de suite, annonce à chaque niveau).
+  Les pièces de niveau III demandent le niveau d'arme 3, le niveau IV (Calibre / Pression) le niveau 5 (`PART_REQ`).
+  Détail dans l'onglet Missions, sur l'éditeur de classes, à l'établi et en fin de partie.
+- **Camouflages par défis** (`cosmetics.js`, `wchal`) : Tigre (300 élim. fusil d'assaut), Cobalt (400 mitraillette),
+  Toxique (300 pompe), Arctique (120 critiques mortels au fusil de précision), Lave (400 lance-flammes),
+  Ivoire (200 à l'arme secondaire), Carbone (une arme au niveau 10).
+- **Prestige** (`PRESTIGE`) : au niveau 50, retour au niveau 1 en gardant tous les déblocages, +500 🔩, insigne ⭐,
+  récompenses exclusives : camouflages Prestige (1), Obsidienne (3), Aurore (5), titres Immortelle (2) et Éternelle (10).
+
+## Contenu et finition
+- **3ᵉ carte : Centre-ville de nuit** (`MAP_CITY`, world.js) : toujours la nuit (`night: true`), 18 lampadaires, place de la mairie,
+  gare, quartier des bars, commissariat & hôpital. Débloquée en atteignant la vague 15 (`MAP_REQ`).
+- **5ᵉ personnage : Nora, médecin** (700 🔩) : +1 réanimation offerte, trousses et soins ×1,5, Rations deux fois plus longues,
+  −10 PV. Capacité **Adrénaline** : soigne 30 % de la vie, sprint de 2 s, intouchable 1 s. Tenues au Garage.
+- **2 nouveaux boss** (`BOSS_ORDER` : vague 5 Mastodonte, 10 Reine, 15 Brûleur, 20 Bélier, 25 Gerbeuse, 30 Abomination) :
+  - **Le Brûleur** : lance des bombes incendiaires qui laissent des brasiers, et une traînée de feu derrière lui ;
+  - **L'Abomination** : frappe le sol (cercle d'avertissement puis onde de choc) ; à sa mort, se divise en 3 brutes et 6 coureurs.
+- **Écran de chargement** avec le logo et des astuces qui défilent ; **nouvelle icône** (main de zombie qui sort du sable devant
+  un soleil couchant, `icons/icon.svg` + PNG 192 et 512).
+
+## Classement en ligne entre amis (facultatif, gratuit)
+Sans configuration, le jeu reste 100 % hors ligne et l'onglet Succès indique que le classement n'est pas activé.
+Pour l'activer (environ 5 minutes) :
+1. Créer un compte et un projet gratuit sur https://supabase.com.
+2. Dans le projet, **SQL Editor** → coller et exécuter :
+   ```sql
+   create table scores (
+     id bigint generated always as identity primary key,
+     created_at timestamptz default now(),
+     group_code text not null check (char_length(group_code) between 3 and 24),
+     name text not null check (char_length(name) <= 16),
+     score int not null check (score >= 0 and score < 10000000),
+     wave int, kills int, char text, map text, win boolean, prestige int
+   );
+   alter table scores enable row level security;
+   create policy "lecture" on scores for select using (true);
+   create policy "ajout" on scores for insert with check (true);
+   create index on scores (group_code, score desc);
+   ```
+3. **Project Settings → API** : copier l'URL du projet et la clé **anon public** dans `js/online.js` (`ONLINE.url`, `ONLINE.key`),
+   puis republier le jeu.
+4. En jeu : Préparation → Succès → **Code du groupe** (le même pour tous les amis, ex. `LES-POTES`). Chaque fin de partie
+   envoie le score ; le classement affiche les 20 meilleurs du groupe.
+
+La clé « anon » est faite pour être publique ; les règles ci-dessus n'autorisent qu'à lire et ajouter des scores. Comme tout
+classement de jeu dans le navigateur, un joueur malin pourrait envoyer un faux score : c'est fait pour jouer entre amis.
+
+## Fortifications, IA des zombies, hordes sur la carte graphique
+- **Fortifications** (`js/forts.js`) : pendant la pause, bouton « 🧱 Fortifier » ou touche **B**. Barricade (40 🔩), sacs de sable
+  (90 🔩, très solides), pieux (50 🔩 : blessent et ralentissent, s'usent). 14 au maximum, 1-2-3 pour choisir.
+  PC : clic pour poser à la souris (aperçu vert / rouge), clic droit pour démonter (50 % remboursés) ; mobile : se pose devant
+  la survivante avec « Poser ». Les zombies ne les contournent pas : ils tapent dedans jusqu'à les casser (les boss 3× plus vite) ;
+  la survivante les enjambe (ralentie) et les balles passent par-dessus. Interdit devant les portes, établis et objectifs.
+- **Zombies plus malins** (entities.js) : dès la vague 6, 30 % des zombies **contournent** pour arriver par le côté ;
+  dès la vague 4, les **coureurs chassent en meute** (un coureur seul rôde jusqu'à ce que 2 autres le rejoignent, puis charge
+  générale plus rapide) ; nouveau **Grimpeur** (vague 8+) qui passe par-dessus toits et véhicules, hors d'atteinte tant qu'il est perché.
+- **Hordes sur la carte graphique** (render3d.js, `bakeVAT`) : au chargement, les animations du zombie sont précalculées dans
+  deux textures (65 ms) ; les zombies ordinaires (rôdeurs, coureurs, rampants, hors élites) sont dessinés en un seul appel,
+  sans squelette à animer. Mesure avec 150 zombies : 9 ms → 1,5 ms de processeur par image, 16,8 ms → 5,9 ms au total.
+  Les zombies à accessoires, élites et boss gardent le modèle animé classique. Interrupteur : Paramètres → « Hordes optimisées ».
+
 ## Où améliorer quoi (une règle simple)
 | Où | Quand | Quoi | Monnaie |
 |---|---|---|---|
-| **Entraînement** (Préparation) | entre les parties | **la survivante** : vie, vitesse, aimant, ferraille, roulade, réanimations, Rex | réserve 🔩 |
 | **Établis** 🔧 + **Armurerie** (sur la carte) | en partie | **les armes** : pièces, nouvelles armes, niveaux, évolutions, peinture | ferraille de la partie |
 | **Refuges** (Pharmacie, Atelier, Hôpital) | en partie | **la survie** : soins, régénération, PV max, blindage, réflexes, vitesse, pièges, tourelles | ferraille de la partie |
 
@@ -134,7 +233,7 @@ ferraille (25 + 8 × n° de vague, CONFIG.waveScrap) à dépenser pendant la pau
   (tourelles, barbelés, fûts piégés, portes renforcées, baskets, aimant), Hôpital (soins complets, PV max,
   blindage, réflexes). À l'intérieur on ne tire plus
   et les zombies ne vous voient plus… mais ils assiègent la porte : si elle cède, vous êtes éjectée.
-- **Objectifs → pièces de la voiture** : bidon d'essence (vague 3), défendre le générateur (7),
+- **Objectifs → pièces de la voiture** : bidon d'essence (vague 3), défendre le générateur (7 : restez à côté pour le réparer ; plus solide à chaque échec, 2 tourelles de renfort après 2 échecs),
   tenir la station-service (12), batterie de l'hôpital (16). Avec les 4 pièces : réparer la
   voiture sous la pression de la horde finale, puis **fuir** (victoire) — ou continuer en sans fin.
 - **Établis d'armurier** (`js/gunsmith.js`) : 5 établis sur la carte (2 sur le parking, 1 par autre zone),
@@ -147,7 +246,7 @@ ferraille (25 + 8 × n° de vague, CONFIG.waveScrap) à dépenser pendant la pau
   Onglet Peinture : essai en direct des peintures du Garage. Modèles des pièces : `applyGunMods` (render3d.js).
 - **Crachats des zombies** : boule verte lumineuse, traînée et anneau au sol qui montre la trajectoire.
 - **Nuit** une vague sur 4 (lampe torche, plus de zombies) et **tempêtes de sable** (visibilité réduite).
-- **Rex le chien** : compagnon à débloquer à l'Entraînement, il mord les zombies proches.
+- **Rex le chien** : rejoint la survivante au niveau 6 de survivante (morsure plus forte aux niveaux 15 et 30).
 
 ## Contenu
 - **Armes secondaires** (4 max) : fusil à pompe, lance-flammes, grenades, drone, mines — niv. 1→5,
@@ -191,3 +290,7 @@ Modèles 3D par **Quaternius** (quaternius.com), licence **CC0**, via Poly Pizza
 Sons : **Kenney** (kenney.nl), packs « Impact Sounds », « Sci-fi Sounds », « Music Jingles », licence **CC0**
 (ssets/audio/, liste dans ssets/audio/manifest.json). Les tirs restent synthétisés.
 Three.js (MIT).
+
+
+**L'Entraînement (bonus permanents achetés avec la réserve) est retiré** : la réserve dépensée est remboursée au lancement.
+La réserve sert aux personnages, au Garage et aux réanimations payantes.

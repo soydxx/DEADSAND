@@ -12,7 +12,7 @@ const FUN = {
   combo: {
     window: 2.6,                 // secondes pour enchaîner l'élimination suivante
     tiers: [[10, 'SÉRIE !', '#ffd24a'], [25, 'CARNAGE !', '#ff9a3a'], [50, 'MASSACRE !', '#ff4a3a'], [100, 'APOCALYPSE !', '#c77dff'], [200, 'LÉGENDAIRE !', '#3ad6ff']],
-    scrap: n => 1 + Math.min(1, Math.floor(n / 10) * 0.1), // +10 % de ferraille par tranche de 10, ×2 max
+    scrap: n => 1 + Math.min(0.5, Math.floor(n / 10) * 0.05), // +5 % de ferraille par tranche de 10, ×1,5 max
   },
   buffs: {
     frenzy:    { name: 'FRÉNÉSIE', icon: '🔥', desc: 'Cadence ×2', color: '#ff8a2a', dur: 15 },
@@ -20,8 +20,8 @@ const FUN = {
     haste:     { name: 'ADRÉNALINE', icon: '⚡', desc: 'Vitesse +40 %', color: '#4ab8ff', dur: 15 },
   },
   buffChance: 0.0045,            // par zombie abattu
-  chestCoins: w => 14 + Math.round(w * 1.6),
-  eliteChest: 0.4,               // probabilité qu'un zombie élite lâche un coffre (les boss en lâchent toujours 2)
+  chestCoins: w => 12 + w,
+  eliteChest: 0.3,               // probabilité qu'un zombie élite lâche un coffre (les boss en lâchent toujours 2)
   challengeChance: 0.5,          // vagues 2+ (hors boss)
 };
 
@@ -37,6 +37,9 @@ const ABILITIES = {
       g.fx.push({ t: 'ring', x: p.x, y: p.y, r: 170 }); Entities.burst(g, p.x, p.y, '#3ad6ff', 30, 300, 3.5, 0.5); Entities.addText(g, p.x, p.y - 50, 'BOUCLIER !', '#3ad6ff', 18); } },
   mechanic: { icon: '🔧', name: 'Tourelle express', desc: 'Pose aussitôt une tourelle devant vous', cd: 26,
     use(g) { const p = g.player, x = p.x + Math.cos(p.aimAngle) * 40, y = p.y + Math.sin(p.aimAngle) * 40; Allies.addTurret(g, x, y); Entities.puff(g, x, y, 6, 12, true); Entities.addText(g, p.x, p.y - 50, 'TOURELLE !', '#ffc21a', 18); } },
+  medic: { icon: '💉', name: 'Adrénaline', desc: 'Soigne 30 % de la vie, sprint de 2 s, intouchable 1 s', cd: 28,
+    use(g) { const p = g.player, h = Math.round(p.maxHp * 0.3); p.hp = Math.min(p.maxHp, p.hp + h); p.sprintT = Math.max(p.sprintT || 0, 2); p.invuln = Math.max(p.invuln, 1);
+      Entities.burst(g, p.x, p.y, '#7dff6a', 30, 260, 3.5, 0.6); Entities.addText(g, p.x, p.y - 50, `ADRÉNALINE · +${h} PV`, '#7dff6a', 18); } },
 };
 
 /* Défis de vague. ok(g) : proposé seulement si possible. on : événement suivi. */

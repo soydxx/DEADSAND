@@ -28,8 +28,10 @@ const UI = {
     // capacité spéciale du personnage
     this.btnAbility = document.getElementById('btn-ability');
     this.btnAbility.addEventListener('pointerdown', e => { e.preventDefault(); e.stopPropagation(); Sfx.unlock(); Fun.useAbility(Game); });
-    // pseudo (Options)
+    // pseudo (Options) et nom de classe (Classes)
     this.el.addEventListener('change', e => {
+      if (e.target.id === 'class-name-input') { const v = e.target.value.replace(/[<>&"]/g, '').trim().slice(0, 14); Loadout.classes()[Save.data.classSel].name = v || `Classe ${Save.data.classSel + 1}`; Save.save(); this.showLobby('classes'); return; }
+      if (e.target.id === 'group-input') { Save.data.settings.group = e.target.value; Save.save(); this.showLobby('ach'); return; }
       if (e.target.id !== 'name-input') return;
       Save.data.name = e.target.value.replace(/[<>&"]/g, '').trim().slice(0, 16); Save.save();
       this.refreshOptions();
@@ -39,6 +41,17 @@ const UI = {
     const tap = (el, fn) => el.addEventListener('pointerdown', e => { e.preventDefault(); e.stopPropagation(); Sfx.unlock(); Sfx.play('click'); fn(); });
     tap(this.btnAction, () => Game.contextAction('enter'));
     tap(this.btnNext, () => Game.contextAction('next'));
+    // fortifications (forts.js) : bouton pendant la pause + barre de choix
+    this.btnBuild = document.getElementById('btn-build');
+    tap(this.btnBuild, () => Forts.toggle(Game, true));
+    this.buildBar = document.getElementById('buildbar');
+    this.buildBar.addEventListener('pointerdown', e => {
+      const b = e.target.closest('button'); if (!b) return;
+      e.preventDefault(); e.stopPropagation(); Sfx.unlock();
+      if (b.dataset.fort) Forts.select(Game, b.dataset.fort);
+      else if (b.dataset.place != null) Forts.place(Game);
+      else if (b.dataset.close != null) Forts.toggle(Game, false);
+    });
     // barre d'inventaire : toucher / cliquer une case = équiper ou poser
     this.hotbar = document.getElementById('hotbar');
     this.hotbar.addEventListener('pointerdown', e => {
@@ -59,6 +72,10 @@ const UI = {
     });
     window.addEventListener('pointermove', e => { if (this._drag && Game.gs) Game.gs.yaw = this._drag.yaw + (e.clientX - this._drag.x) * 0.012; });
     window.addEventListener('pointerup', () => { this._drag = null; });
+    // tutoriel : consigne en haut de l'écran (+ bouton pour le quitter)
+    this.tutEl = document.createElement('div'); this.tutEl.id = 'tut'; this.tutEl.className = 'hidden';
+    document.body.appendChild(this.tutEl);
+    this.tutEl.addEventListener('pointerdown', e => { if (e.target.closest('[data-tut-quit]')) { e.preventDefault(); Sfx.play('click'); Game.toLobby(); } });
     // plus de bouton « couper le son » : le volume se règle dans les Paramètres (un ancien « muet » est levé)
     if (Sfx.muted) Sfx.setMuted(false);
   },
@@ -80,7 +97,7 @@ const UI = {
     const sig = slots.map(s => `${s.id}${s.active ? '*' : ''}${s.count || ''}${s.extra || ''}${s.lvl || ''}${s.evo ? 'e' : ''}`).join('|') + touch + keysSig;
     if (sig !== this._hotSig) {
       this._hotSig = sig;
-      const alt = { grenade: Inventory.label('grenade'), mine: Inventory.label('mine') };
+      const alt = { lethal: Inventory.label('grenade'), tactical: Inventory.label('mine'), secondary: Inventory.label('next') };
       this.hotbar.innerHTML = slots.map((s, i) => `<button class="slot ${s.kind} ${s.active ? 'on' : ''} ${s.evo ? 'evo' : ''}" data-slot="${s.id}" title="${s.name}">
         <span class="ic">${s.icon}</span>
         ${touch ? '' : `<span class="key">${i < 8 ? Inventory.label('slot' + (i + 1)) : ''}${alt[s.id] ? ` · ${alt[s.id]}` : ''}</span>`}
@@ -92,7 +109,42 @@ const UI = {
     for (const s of slots) if (s.cd != null) { const el = this.hotbar.querySelector(`[data-slot="${s.id}"] .cd`); if (el) el.style.height = `${Math.round(s.cd * 100)}%`; }
   },
 
+  /** Consigne du tutoriel (reconstruite seulement quand elle change) */
+  tickTutorial(g) {
+    const show = !!(g.tut && g.state === 'playing' && g.player && !g.player.inside);
+    this.tutEl.classList.toggle('hidden', !show);
+    if (!show) return;
+    const i = Tutorial.info(g); if (!i) return;
+    const sig = JSON.stringify(i) + Input.mode;
+    if (sig === this._tutSig) return;
+    this._tutSig = sig;
+    this.tutEl.classList.toggle('ok', i.ok);
+    this.tutEl.innerHTML = `<div class="tut-top"><small>🎓 TUTORIEL · ${i.n} / ${i.of}</small><button data-tut-quit title="Quitter le tutoriel">Quitter ✕</button></div>
+      <b>${i.ok ? '✔ ' : ''}${i.title}${i.count ? ` <em>${i.count}</em>` : ''}</b><span>${i.text}</span>
+      <i class="tut-bar"><em style="width:${Math.round((i.n - (i.ok ? 0 : 1)) / i.of * 100)}%"></em></i>`;
+  },
+
+  showTutorialEnd(g, reward) {
+    this.screen = 'main';
+    const touch = Input.mode === 'touch';
+    this.open(`
+      <h2>🎓 Tutoriel terminé !</h2>
+      <p class="sub">Vous savez tout ce qu'il faut pour tenir. Pour le reste :</p>
+      <ul class="tut-recap">
+        <li>🌊 Les zombies arrivent par <b>vagues</b>. Entre deux vagues, une <b>pause</b> vous laisse aller aux établis et aux refuges (${touch ? 'bouton ▶' : `touche ${Inventory.label('wave')}`} pour lancer la suivante).</li>
+        <li>🧱 Pendant la pause, <b>fortifiez</b> (${touch ? 'bouton « Fortifier »' : `touche ${Inventory.label('build')}`}) : barricades, sacs de sable et pieux que la horde doit casser.</li>
+        <li>🚗 Accomplissez les <b>objectifs</b> pour récupérer 4 pièces de voiture, réparez-la et <b>évadez-vous</b>.</li>
+        <li>🔩 La ferraille de la partie sert aux établis et aux refuges ; une part va dans votre <b>réserve</b> à la fin.</li>
+        <li>🎖️ Dans la Préparation, créez vos <b>classes</b> : arme principale, secondaire, explosifs et atouts.</li>
+      </ul>
+      ${reward ? `<p class="banked">🎁 +${reward} 🔩 versés dans la réserve</p>` : ''}
+      <button class="btn" data-action="play">▶ Première vraie partie</button>
+      <button class="btn small ghost" data-action="menu">🧍 Préparation</button>
+    `, 500);
+  },
+
   tick(g) {
+    this.tickTutorial(g);
     this.tickContext(g);
     this.tickAbility(g);
     this.tickHotbar(g);
@@ -139,6 +191,9 @@ const UI = {
       this.btnAction.classList.toggle('hidden', !actTxt);
       this.btnAction.classList.toggle('off', !!(s && s.broken));
     }
+    const buildTxt = playing && g.build && !g.build.on && Forts.canBuild(g) ? `🧱 Fortifier${touch ? '' : ` (${Inventory.label('build')})`}` : '';
+    if (this._build !== buildTxt) { this._build = buildTxt; this.btnBuild.textContent = buildTxt; this.btnBuild.classList.toggle('hidden', !buildTxt); }
+    this.tickBuild(g, touch);
     const nextTxt = playing && g.phase === 'break' ? `▶ Vague ${g.wave.num + 1} · ${Math.ceil(g.breakT)} s${touch ? '' : ` (${Inventory.label('wave')})`}` : '';
     if (this._next !== nextTxt) {
       this._next = nextTxt;
@@ -154,6 +209,23 @@ const UI = {
       if (hp) hp.textContent = `${Math.ceil(p.hp)} / ${p.maxHp}`;
       if (coins) coins.textContent = g.coins;
     }
+  },
+
+  /** Barre du mode construction : choix de la fortification, prix, nombre posé, aide */
+  tickBuild(g, touch) {
+    const B = g.build, show = !!(B && B.on && g.state === 'playing');
+    this.buildBar.classList.toggle('hidden', !show);
+    if (!show) return;
+    const sig = `${B.kind}|${g.coins}|${g.forts.length}|${touch}`;
+    if (sig === this._buildSig) return;
+    this._buildSig = sig;
+    const items = Object.entries(FORTS).map(([id, F], i) => {
+      const cost = Forts.cost(g, id);
+      return `<button class="${B.kind === id ? 'on' : ''} ${g.coins < cost ? 'poor' : ''}" data-fort="${id}" title="${F.desc}"><span class="ic">${F.icon}</span><b>${F.name}</b><small>${cost} 🔩${touch ? '' : ` · ${i + 1}`}</small></button>`;
+    }).join('');
+    this.buildBar.innerHTML = `<div class="bb-head"><b>🧱 Fortifier</b><small>${g.forts.length} / ${FORT_MAX} · ${touch ? 'se pose devant vous' : 'clic : poser · clic droit : démonter (50 %)'}</small></div>
+      <div class="bb-items">${items}</div>
+      <div class="bb-act">${touch ? '<button class="place" data-place>Poser</button>' : ''}<button class="close" data-close>✕${touch ? '' : ' Échap'}</button></div>`;
   },
 
   /** lockMs : délai avant que les boutons soient cliquables (évite les taps accidentels) */
@@ -202,12 +274,14 @@ const UI = {
     const touch = Input.mode === 'touch';
     this.open(`
       <div class="title-top">
+        <img class="title-logo" src="icons/icon.svg" alt="">
         <h1 class="title">DEAD<span>SAND</span></h1>
         <p class="tag">Votre voiture a calé en plein désert. La horde arrive.</p>
         <p class="who-title">${this.levelBadge()} ${Cosmetics.playerName()} · <span>${Cosmetics.title()}</span></p>
       </div>
       <div class="title-bottom">
         <button class="btn big" data-action="start" autofocus>Commencer</button>
+        <button class="btn small ${Save.data.tutDone ? 'ghost' : 'tut-new'} title-set" data-action="tutorial">🎓 Tutoriel${Save.data.tutDone ? '' : ' (2 min)'}</button>
         <button class="btn small ghost title-set" data-action="settings">⚙️ Paramètres</button>
         ${best.score ? `<p class="best">Record : <b>${best.score}</b> pts · vague ${best.wave}</p>` : ''}
         ${Render.softGL ? '<p class="hint warn">⚠️ Accélération graphique désactivée dans ce navigateur : le jeu sera lent (voir ⚙️ Paramètres).</p>' : ''}
@@ -232,8 +306,8 @@ const UI = {
   showLobby(tab = this.tab || 'chars') {
     this.tab = tab;
     const S = Save.data, sel = CHARACTERS[S.char];
-    const tabs = [['chars', '🧍', 'Équipe'], ['missions', '🎯', 'Missions'], ['garage', '🎨', 'Garage'], ['shop', '💪', 'Entraîn.'], ['ach', '🏆', 'Succès'], ['options', '⚙️', 'Options']];
-    const body = { chars: () => this.tabChars(), missions: () => this.tabMissions(), garage: () => this.tabGarage(), shop: () => this.tabShop(), ach: () => this.tabAch(), options: () => this.tabOptions() }[tab]();
+    const tabs = [['classes', '🎖️', 'Classes'], ['chars', '🧍', 'Équipe'], ['missions', '🎯', 'Missions'], ['garage', '🎨', 'Garage'], ['ach', '🏆', 'Succès'], ['options', '⚙️', 'Options']];
+    const body = { classes: () => this.tabClasses(), chars: () => this.tabChars(), missions: () => this.tabMissions(), garage: () => this.tabGarage(), ach: () => this.tabAch(), options: () => this.tabOptions() }[tab]();
     const inner = `
       <div class="lobby-head">
         <div><h2>Préparation</h2><div class="who">${this.levelBadge()} ${Cosmetics.playerName()} · <span>${Cosmetics.title()}</span></div></div>
@@ -242,8 +316,8 @@ const UI = {
       <div class="tabs">${tabs.map(([id, ic, nm]) => `<button class="${id === tab ? 'on' : ''}" data-action="tab" data-tab="${id}"><span>${ic}</span>${nm}</button>`).join('')}</div>
       <div class="lobby-body">${body}</div>
       <div class="lobby-foot">
-        <button class="btn" data-action="play">▶ Lancer la partie <span class="muted">· ${sel.name}${runModsChosen().length ? ` · ${runModsChosen().map(m => m.icon).join('')} +${Math.round(runModsBonus(runModsChosen()) * 100)} %` : ''}</span></button>
-        <div class="foot-links"><button class="link" data-action="title">← Écran titre</button></div>
+        <button class="btn" data-action="play">▶ Lancer la partie <span class="muted">· ${sel.name} · ${Loadout.current().name}${runModsChosen().length ? ` · ${runModsChosen().map(m => m.icon).join('')} +${Math.round(runModsBonus(runModsChosen()) * 100)} %` : ''}</span></button>
+        <div class="foot-links"><button class="link" data-action="title">← Écran titre</button><button class="link" data-action="tutorial">🎓 ${S.tutDone ? 'Refaire le tutoriel' : 'Tutoriel (2 min) · +150 🔩'}</button></div>
       </div>`;
     const panel = this.screen === 'lobby' && this.el.querySelector('.panel.lobby');
     if (panel) { // simple changement d'onglet : pas d'animation d'ouverture
@@ -254,10 +328,43 @@ const UI = {
     this.screen = 'lobby';
   },
 
+  /** Création de classe (façon Call of Duty) : 3 classes, arme principale, létal, tactique, 3 atouts */
+  tabClasses() {
+    const S = Save.data, list = Loadout.classes(), sel = S.classSel, L = Loadout.current(), lvl = Loadout.level(), pick = this.classPick;
+    const P = PRIMARIES[L.primary];
+    const lock = it => (Loadout.open(it) ? '' : `<span class="cl-lock">🔒 Niv. ${it.level}</span>`);
+    const slots = list.map((c, i) => `<button class="${i === sel ? 'on' : ''}" data-action="clsSel" data-i="${i}"><b>${(c.name || `Classe ${i + 1}`).replace(/[<>&"]/g, '')}</b><small>${PRIMARIES[c.primary] ? PRIMARIES[c.primary].icon : '🔫'} ${i === sel ? '✔ Utilisée' : 'Choisir'}</small></button>`).join('');
+    const row = (key, label, icon, name, sub, color, extra = '') => `<button class="cl-row ${pick === key ? 'open' : ''}" data-action="clsPick" data-slot="${key}" style="--c:${color}">
+        <span class="cl-lbl">${label}</span><span class="ic">${icon}</span><span class="txt"><b>${name}</b><small>${sub}</small>${extra}</span><span class="cl-arrow">${pick === key ? '▲' : '▼'}</span></button>`;
+    const bars = Object.entries(P.bars).map(([n, v]) => `<div class="cl-bar"><span>${n}</span><i><em style="width:${Math.round(v * 100)}%"></em></i></div>`).join('');
+    // liste de choix sous la ligne ouverte
+    const picker = (key, items) => (pick !== key ? '' : `<div class="cl-pick">${items.map(([id, ic, nm, ds, it, on]) => `<button class="${on ? 'on' : ''} ${Loadout.open(it) ? '' : 'locked'}" data-action="clsSet" data-slot="${key}" data-id="${id}" ${Loadout.open(it) ? '' : 'disabled'}><span class="ic">${ic}</span><span class="txt"><b>${nm}${on ? ' ✔' : ''}</b><small>${ds}</small></span>${lock(it)}</button>`).join('')}</div>`);
+    const pk = i => Loadout.perk(i, L.perks[i]);
+    const add = list.length < MAX_CLASSES ? '<button class="cl-add" data-action="clsNew" title="Créer une nouvelle classe"><b>+</b><small>Nouvelle</small></button>' : '';
+    let html = `<div class="cl-slots">${slots}${add}</div>
+      <div class="opt cl-name"><span>Nom de la classe</span><input id="class-name-input" class="name-input" maxlength="14" value="${(list[sel].name || '').replace(/"/g, '&quot;')}">${list.length > 1 ? '<button class="link cl-del" data-action="clsDel" title="Supprimer cette classe">🗑️</button>' : ''}</div>`;
+    const wl = id => { const w = Progress.wLevel(id); return `<span class="wl-tag">Arme niv. ${w.lvl}${w.max ? '' : ` · ${w.kills}/${w.next}`}</span>`; };
+    html += row('primary', 'PRINCIPALE', P.icon, `${P.name} ${wl(L.primary)}`, P.desc, '#ffc21a', `<span class="cl-bars">${bars}</span>`);
+    html += picker('primary', Object.entries(PRIMARIES).map(([id, it]) => [id, it.icon, it.name, `${it.desc} · arme niv. ${Progress.wLevel(id).lvl}`, it, id === L.primary]));
+    const Sx = SECONDARIES[L.secondary];
+    html += row('secondary', 'SECOND&shy;AIRE', Sx.icon, `${Sx.name} ${wl(L.secondary)}`, `${Sx.desc} · touche ${Inventory.label('slot2')} ou ${Inventory.label('next')}`, '#c9d2da');
+    html += picker('secondary', Object.entries(SECONDARIES).map(([id, it]) => [id, it.icon, it.name, `${it.desc} · arme niv. ${Progress.wLevel(id).lvl}`, it, id === L.secondary]));
+    html += row('lethal', 'LÉTAL', WEAPONS[L.lethal].icon, WEAPONS[L.lethal].name, `${LETHALS[L.lethal].desc} · touche ${Inventory.label('grenade')}`, '#ff8a3a');
+    html += picker('lethal', Object.entries(LETHALS).map(([id, it]) => [id, WEAPONS[id].icon, WEAPONS[id].name, it.desc, it, id === L.lethal]));
+    html += row('tactical', 'TACTIQUE', WEAPONS[L.tactical].icon, WEAPONS[L.tactical].name, `${TACTICALS[L.tactical].desc}${WEAPONS[L.tactical].type === 'manual' ? ` · touche ${Inventory.label('mine')}` : ''}`, '#3ad6ff');
+    html += picker('tactical', Object.entries(TACTICALS).map(([id, it]) => [id, WEAPONS[id].icon, WEAPONS[id].name, it.desc, it, id === L.tactical]));
+    for (let i = 0; i < 3; i++) {
+      html += row('perk' + i, `ATOUT ${i + 1}`, pk(i).icon, pk(i).name, pk(i).desc, PERK_COLORS[i]);
+      html += picker('perk' + i, PERKS[i].map(it => [it.id, it.icon, it.name, it.desc, it, it.id === L.perks[i]]));
+    }
+    const next = [...Object.values(PRIMARIES), ...Object.values(SECONDARIES), ...Object.values(LETHALS), ...Object.values(TACTICALS), ...PERKS.flat()].filter(it => it.level > lvl).sort((a, b) => a.level - b.level)[0];
+    return html + `<p class="hint">Votre arme et votre équipement s'améliorent ensuite aux établis 🔧 pendant la partie.${next ? ` Prochain déblocage au <b>niveau ${next.level}</b> (vous êtes niveau ${lvl}).` : ''}</p>`;
+  },
+
   /** Pastille de niveau avec petite barre d'expérience */
   levelBadge() {
-    const l = Progress.level(), k = l >= LEVELS.max ? 1 : Progress.xp() / LEVELS.xpFor(l);
-    return `<span class="lvl-badge" title="Niveau de survivante">Niv. ${l}<i style="width:${Math.round(k * 100)}%"></i></span>`;
+    const l = Progress.level(), k = l >= LEVELS.max ? 1 : Progress.xp() / LEVELS.xpFor(l), pr = Progress.prestige();
+    return `<span class="lvl-badge ${pr ? 'prestige' : ''}" title="Niveau de survivante${pr ? ` · prestige ${pr}` : ''}">${pr ? `⭐${pr} · ` : ''}Niv. ${l}<i style="width:${Math.round(k * 100)}%"></i></span>`;
   },
 
   /** Missions du jour / de la semaine + niveau de survivante */
@@ -272,11 +379,43 @@ const UI = {
     return `<div class="lvl-card"><div><b>Niveau ${l}</b>${l < LEVELS.max ? `<small>${xp} / ${need} XP</small>` : '<small>Niveau maximum</small>'}</div>
         <div class="xp-bar static"><i style="width:${l >= LEVELS.max ? 100 : Math.round(xp / need * 100)}%"></i></div>
         <p class="hint">Chaque partie rapporte de l'expérience, même perdue. Chaque niveau : +${LEVELS.bank(l + 1)} 🔩 en réserve${nx ? ` · prochain cadeau au niveau ${nx.level} : ${nx.icon} ${nx.name}` : ''}.</p></div>
+      ${this.prestigeBlock()}
       <h3>Missions du jour <small class="muted">· renouvelées dans ${Progress.left(false)}</small></h3>
       <div class="mis-list">${M.daily.map(row).join('')}</div>
       <h3>Mission de la semaine <small class="muted">· encore ${Progress.left(true)}</small></h3>
       <div class="mis-list">${row(M.weekly)}</div>
-      <p class="hint">Les missions avancent à la fin de chaque partie ; la récompense est versée automatiquement.</p>`;
+      <p class="hint">Les missions avancent à la fin de chaque partie ; la récompense est versée automatiquement.</p>
+      ${this.weaponsBlock()}`;
+  },
+
+  /** Prestige : au niveau 50, repartir au niveau 1 en gardant tout */
+  prestigeBlock() {
+    const pr = Progress.prestige(), next = pr + 1;
+    const rewards = COSMETICS.filter(c => c.prestige === next).map(c => `${c.icon} ${c.name}`).join(' · ');
+    if (!Progress.canPrestige()) return pr ? `<p class="hint">⭐ Prestige ${pr}${pr >= PRESTIGE.max ? ' (maximum)' : ` · prochain prestige au niveau ${LEVELS.max}`}. Tous vos déblocages sont conservés.</p>` : `<p class="hint">⭐ Au niveau ${LEVELS.max}, vous pourrez passer <b>prestige</b> : retour au niveau 1, en gardant tout ce qui est débloqué, plus des récompenses exclusives.</p>`;
+    return `<div class="prestige-card">
+      <b>⭐ Prestige ${next} disponible !</b>
+      <span>Retour au niveau 1 · vous gardez armes, atouts, tenues et peintures · +${PRESTIGE.bank} 🔩${rewards ? ` · ${rewards}` : ''}</span>
+      ${this.prestigeAsk ? `<div class="menu-grid two"><button class="btn small" data-action="prestige">Confirmer le prestige ${next}</button><button class="btn small ghost" data-action="prestigeNo">Annuler</button></div>`
+        : '<button class="btn small" data-action="prestigeAsk">Passer prestige</button>'}
+    </div>`;
+  },
+
+  /** Niveaux d'armes et défis de camouflage */
+  weaponsBlock() {
+    const rowW = (id, it) => {
+      const w = Progress.wLevel(id), k = w.max ? 1 : (w.kills - w.prev) / (w.next - w.prev), open = Loadout.open(it);
+      return `<div class="wl-row ${open ? '' : 'locked'}"><span class="ic">${it.icon}</span><span class="txt"><b>${it.name} <small>· niv. ${w.lvl}${w.max ? ' (max)' : ''}</small></b>
+        <span class="mbar"><i style="width:${Math.round(k * 100)}%"></i></span><small>${open ? `${w.kills} éliminations${w.max ? '' : ` · niveau ${w.lvl + 1} à ${w.next}`}` : `🔒 Niveau ${it.level} de survivante`}</small></span></div>`;
+    };
+    const weapons = [...Object.entries(PRIMARIES), ...Object.entries(SECONDARIES)].map(([id, it]) => rowW(id, it)).join('');
+    const camos = COSMETICS.filter(c => c.wchal).map(c => {
+      const ch = Progress.wchal(c.wchal), k = ch.have / ch.n;
+      return `<div class="wl-row ${ch.done ? 'done' : ''}"><span class="ic">${c.icon}</span><span class="txt"><b>${c.name}${ch.done ? ' ✔' : ''}</b>
+        <span class="mbar"><i style="width:${Math.round(k * 100)}%"></i></span><small>${c.wchal.t} · ${ch.have} / ${ch.n}</small></span></div>`;
+    }).join('');
+    return `<h3>Niveaux d'armes <small class="muted">· pièces III au niveau 3, IV au niveau 5</small></h3><div class="wl-list">${weapons}</div>
+      <h3>Défis de camouflage <small class="muted">· peintures à équiper au Garage ou à l'établi</small></h3><div class="wl-list">${camos}</div>`;
   },
 
   tabChars() {
@@ -284,7 +423,7 @@ const UI = {
     const list = Object.entries(CHARACTERS).map(([id, c]) => {
       const owned = charOwned(id);
       return `<button class="char ${id === pid ? 'on' : ''} ${owned ? '' : 'locked'}" data-action="preview" data-id="${id}">
-        <span class="av">${{ swat: '🪖', scout: '🏃‍♀️', mechanic: '🔧' }[id] || '🧍‍♀️'}</span>
+        <span class="av">${{ swat: '🪖', scout: '🏃‍♀️', mechanic: '🔧', medic: '🩺' }[id] || '🧍‍♀️'}</span>
         <span class="nm">${c.name}</span><span class="rl">${owned ? (S.char === id ? '✔ Choisie' : c.role) : c.unlock ? '🔒 Évasion' : `🔒 ${c.cost} 🔩`}</span>
       </button>`;
     }).join('');
@@ -301,7 +440,7 @@ const UI = {
         <div class="stats-bars">${stats}</div>
         ${act}
       </div>
-      ${S.perm.dog ? '<p class="hint center">🐺 Rex vous accompagne sur le terrain.</p>' : ''}
+      ${dogLevel() ? '<p class="hint center">🐺 Rex vous accompagne sur le terrain.</p>' : `<p class="hint center">🐺 Rex le chien vous rejoint au niveau ${DOG_LEVELS[0]} de survivante.</p>`}
       <div class="ab-card"><span class="ic">${(ABILITIES[pid] || ABILITIES.survivor).icon}</span><span><b>Capacité : ${(ABILITIES[pid] || ABILITIES.survivor).name}</b><small>${(ABILITIES[pid] || ABILITIES.survivor).desc} · recharge ${(ABILITIES[pid] || ABILITIES.survivor).cd} s · touche ${Inventory.label('ability')}</small></span></div>
       ${this.modsBlock()}`;
   },
@@ -310,8 +449,8 @@ const UI = {
   modsBlock() {
     const on = (Save.data.settings.runMods) || {}, bonus = runModsBonus(runModsChosen());
     const maps = Object.values(MAPS).map(m => {
-      const open = m.id === 'desert' || !!Save.data.ach.escape, cur = MAP.id === m.id;
-      return `<button class="${cur ? 'on' : ''} ${open ? '' : 'locked'}" data-action="map" data-id="${m.id}" ${open ? '' : 'disabled'}><span>${m.icon}</span><b>${m.name}</b><small>${cur ? '✔ Sélectionnée' : open ? 'Choisir (recharge le jeu)' : '🔒 Évadez-vous une fois'}</small></button>`;
+      const open = mapOpen(m.id), cur = MAP.id === m.id;
+      return `<button class="${cur ? 'on' : ''} ${open ? '' : 'locked'}" data-action="map" data-id="${m.id}" ${open ? '' : 'disabled'}><span>${m.icon}</span><b>${m.name}</b><small>${cur ? '✔ Sélectionnée' : open ? `Choisir (recharge le jeu)${m.night ? ' · toujours la nuit' : ''}` : MAP_REQ[m.id].text}</small></button>`;
     }).join('');
     return `<h3>Carte</h3><div class="map-pick">${maps}</div>
       <h3>Règles de la partie <small class="muted">· facultatif</small></h3>
@@ -326,7 +465,7 @@ const UI = {
     let items = COSMETICS.filter(c => c.cat === cat);
     let note = '';
     if (cat === 'outfit') { items = items.filter(c => c.char === S.char); note = `<p class="hint">Tenues de <b>${CHARACTERS[S.char].name}</b> · changez de personnage dans l'onglet Équipe.</p>`; }
-    if (cat === 'dog' && !S.perm.dog) note = '<p class="hint">Rex se débloque à l\'Entraînement. Vous pouvez déjà préparer son look.</p>';
+    if (cat === 'dog' && !dogLevel()) note = `<p class="hint">Rex vous rejoint au niveau ${DOG_LEVELS[0]} de survivante. Vous pouvez déjà préparer son look.</p>`;
     if (cat === 'title') note = `<p class="hint">Affiché à côté de votre pseudo (« ${Cosmetics.playerName()} », modifiable dans Options). Les titres s'obtiennent avec les succès.</p>`;
     if (cat === 'theme') note = '<p class="hint">Ambiance du parking sur l\'écran titre et dans la Préparation.</p>';
     // regroupement par emplacement (voiture : peinture / autocollant / équipement…)
@@ -348,61 +487,33 @@ const UI = {
     return `<div class="chips-row">${chips}</div>${note}${rows}`;
   },
 
-  /** Achats possibles avec la réserve : bonus d'entraînement + personnages à débloquer */
-  affordable(bank) {
-    const S = Save.data, out = [];
-    for (const it of SHOP) {
-      const l = S.perm[it.id] || 0;
-      if (l < it.max && it.cost(l) <= bank) out.push({ icon: it.icon, name: `${it.name} niv. ${l + 1}`, cost: it.cost(l) });
-    }
-    for (const [id, c] of Object.entries(CHARACTERS)) if (!charOwned(id) && !c.unlock && c.cost <= bank) out.push({ icon: '🧍', name: `Personnage ${c.name}`, cost: c.cost });
-    return out;
-  },
-  cheapest() {
-    const S = Save.data;
-    const costs = SHOP.filter(it => (S.perm[it.id] || 0) < it.max).map(it => ({ it, cost: it.cost(S.perm[it.id] || 0) }));
-    return costs.sort((a, b) => a.cost - b.cost)[0] || null;
-  },
-
-  tabShop() {
-    const S = Save.data, cheap = this.cheapest();
-    const empty = !this.affordable(S.bank).length;
-    const explain = `<div class="explain">
-        <b>💡 Comment ça marche ?</b>
-        <ol>
-          <li>En partie, ramassez la <b>ferraille 🔩</b> lâchée par les zombies.</li>
-          <li>À la fin de la partie, une part de ce qu'il vous reste est versée dans votre <b>réserve</b> : ${Math.round(BANKING.base * 100)} % à la vague 1, puis +${Math.round(BANKING.perWave * 100)} % par vague (max ${Math.round(BANKING.max * 100)} %), 100 % en cas d'évasion.</li>
-          <li>Ici, la réserve achète des <b>bonus permanents</b>, actifs dès le début de chaque partie.</li>
-        </ol>
-        ${cheap ? `<p>Premier objectif : <b>${cheap.it.icon} ${cheap.it.name}</b> pour <b>${cheap.cost} 🔩</b>${S.bank ? ` (encore ${Math.max(0, cheap.cost - S.bank)} 🔩)` : ''}.</p>` : ''}
-      </div>`;
-    // la règle des trois endroits, pour les nouveaux joueurs
-    const where = `<div class="where">
-        <div class="on"><span>💪</span><b>Entraînement</b><small>améliore <b>vous</b>, pour toujours (réserve)</small></div>
-        <div><span>🔧</span><b>Établis</b><small>améliorent vos <b>armes</b>, en partie</small></div>
-        <div><span>🏥</span><b>Refuges</b><small>soins, protections, pièges, en partie</small></div>
-      </div>`;
-    return `${where}${empty ? explain : `<p class="sub">Bonus permanents de la survivante, actifs dès le début de chaque partie. En fin de partie, ${Math.round(BANKING.base * 100)} à ${Math.round(BANKING.max * 100)} % de la ferraille restante arrive ici selon la vague atteinte (100 % si vous vous évadez).</p>`}
-      <div class="shop-list">${SHOP.map(it => {
-        const l = S.perm[it.id] || 0, maxed = l >= it.max, cost = maxed ? 0 : it.cost(l);
-        const pips = Array.from({ length: it.max }, (_, i) => `<i class="${i < l ? 'on' : ''}"></i>`).join('');
-        return `<div class="shop-row">
-          <span class="ic">${it.icon}</span>
-          <span class="txt"><b>${it.name}</b><small>${it.desc}</small><span class="pips">${pips}</span></span>
-          ${maxed ? '<span class="tagline ok">Max</span>' : `<button class="btn small" data-action="buyPerm" data-id="${it.id}" ${S.bank < cost ? 'disabled' : ''}>${cost} 🔩</button>`}
-        </div>`;
-      }).join('')}</div>`;
-  },
-
   tabAch() {
     const S = Save.data;
     // les 10 meilleures parties (sur cet appareil)
-    const names = { rifle: 'Fusil', shotgun: 'Pompe', flamer: 'Flammes', boom: 'Explosions', drone: 'Drone', turret: 'Tourelles', trap: 'Barbelés', dog: 'Rex' };
+    const names = { rifle: 'Fusil', shotgun: 'Pompe', flamer: 'Flammes', boom: 'Explosions', drone: 'Drone', turret: 'Tourelles', trap: 'Barbelés', dog: 'Rex', ally: 'Survivants' };
     const board = (S.board || []).map((r, i) => `<tr class="${i < 3 ? 'top' : ''}"><td>${['🥇', '🥈', '🥉'][i] || i + 1}</td><td><b>${r.score}</b></td><td>V${r.wave}${r.win ? ' 🚗' : ''}</td><td>${CHARACTERS[r.char] ? CHARACTERS[r.char].name : ''}</td><td>${names[r.fav] || ''}</td><td>${r.mods ? `⚙️${r.mods}` : ''}</td><td class="muted">${r.date}</td></tr>`).join('');
-    const boardHtml = `<h3>🏅 Meilleures parties</h3>${board ? `<table class="board"><thead><tr><th></th><th>Score</th><th>Vague</th><th>Perso</th><th>Arme</th><th></th><th></th></tr></thead><tbody>${board}</tbody></table>` : '<p class="hint">Jouez une partie pour inscrire votre premier score.</p>'}<h3>🏆 Succès</h3>`;
+    const boardHtml = `<h3>🏅 Meilleures parties</h3>${board ? `<table class="board"><thead><tr><th></th><th>Score</th><th>Vague</th><th>Perso</th><th>Arme</th><th></th><th></th></tr></thead><tbody>${board}</tbody></table>` : '<p class="hint">Jouez une partie pour inscrire votre premier score.</p>'}${this.onlineBlock()}<h3>🏆 Succès</h3>`;
     return `${boardHtml}<p class="sub">${Object.keys(S.ach).length} / ${ACHIEVEMENTS.length} débloqués · ${S.stats.kills} zombies abattus · ${S.stats.runs} parties</p>
       <div class="ach-list">${ACHIEVEMENTS.map(a => `<div class="ach ${S.ach[a.id] ? 'done' : ''}"><span class="ic">${S.ach[a.id] ? a.icon : '🔒'}</span>
         <span><b>${a.name}</b><small>${a.desc}</small></span></div>`).join('')}</div>`;
+  },
+
+  /** Classement en ligne entre amis (js/online.js) : code de groupe + 20 meilleurs scores, chargés en arrière-plan */
+  onlineBlock() {
+    if (!Online.enabled()) return `<h3>🌐 Classement entre amis</h3><p class="hint">Pas encore activé sur ce site. La personne qui publie le jeu peut le brancher sur un projet Supabase gratuit (voir le README).</p>`;
+    const grp = Online.group(), esc = s => String(s == null ? '' : s).replace(/[<>&"]/g, '');
+    let list = '<p class="hint">Choisissez un code de groupe (le même que vos amis) : vos scores y seront envoyés à la fin de chaque partie.</p>';
+    if (grp.length >= 3) {
+      const c = Online.cache[grp];
+      if (!c) { list = '<p class="hint">Chargement du classement…</p>'; Online.top(grp).then(() => { if (this.screen === 'lobby' && this.tab === 'ach') this.showLobby('ach'); }); }
+      else if (c.error) list = `<p class="hint warn">⚠️ ${c.error} · le classement sera rechargé plus tard.</p>`;
+      else if (!c.rows.length) list = '<p class="hint">Aucun score dans ce groupe pour l\'instant : à vous de jouer !</p>';
+      else list = `<table class="board"><thead><tr><th></th><th>Joueur</th><th>Score</th><th>Vague</th><th>Perso</th></tr></thead><tbody>${c.rows.map((r, i) => `<tr class="${i < 3 ? 'top' : ''} ${r.name === Cosmetics.playerName() ? 'me' : ''}"><td>${['🥇', '🥈', '🥉'][i] || i + 1}</td><td><b>${r.prestige ? `⭐${esc(r.prestige)} ` : ''}${esc(r.name)}</b></td><td>${esc(r.score)}</td><td>V${esc(r.wave)}${r.win ? ' 🚗' : ''}</td><td>${CHARACTERS[r.char] ? CHARACTERS[r.char].name : ''}${MAPS[r.map] ? ` ${MAPS[r.map].icon}` : ''}</td></tr>`).join('')}</tbody></table>`;
+    }
+    return `<h3>🌐 Classement entre amis</h3>
+      <div class="opt"><span>Code du groupe</span><input id="group-input" class="name-input" maxlength="24" placeholder="ex. LES-POTES" value="${esc(grp)}"></div>
+      ${grp && Cosmetics.playerName() === 'Survivante' ? '<p class="hint">Astuce : choisissez un pseudo dans Options pour qu\'on vous reconnaisse.</p>' : ''}
+      ${list}`;
   },
 
   /** Paramètres hors Préparation (écran titre ou partie en pause) : même contenu que l'onglet Options */
@@ -433,6 +544,8 @@ const UI = {
       <div class="opt"><span>Musique</span>${seg('music', vol)}</div>
       <div class="opt"><span>Vibrations</span>${seg('vibrate', [[true, 'Oui'], [false, 'Non']])}</div>
       <div class="opt"><span>Afficher les images/s</span>${seg('fps', [[false, 'Non'], [true, 'Oui']])}</div>
+      <div class="opt"><span>Hordes optimisées</span>${seg('vat', [[true, 'Oui'], [false, 'Non']])}</div>
+      <p class="hint">Dessine la horde en un seul passage sur la carte graphique (3× plus rapide). Si des zombies s'affichent mal, choisissez « Non » puis rechargez la page.${Save.data.settings.vat !== false && Render.vat === null ? ' ⚠️ Non disponible sur cet appareil : mode classique utilisé.' : ''}</p>
       <div class="opt"><span>Sons enregistrés</span>${seg('realSfx', [[false, 'Non'], [true, 'Oui']])}</div>
       <p class="hint">Remplace quelques bruitages (explosions, portes, capacités, fanfares) par des sons enregistrés (Kenney, CC0). Désactivé par défaut.</p>
       ${inRun ? '' : '<button class="btn small ghost" data-action="reload">Appliquer et recharger</button>'}
@@ -493,55 +606,54 @@ const UI = {
       Onglet Pièces : chaque pièce a 3 niveaux, visibles sur le modèle. Onglet Peinture : aperçu en direct. */
   showGunsmith(g) {
     const gs = g.gs; if (!gs) return;
-    if (!Gunsmith.guns(g).includes(gs.gun)) gs.gun = 'rifle';
+    if (!Gunsmith.guns(g).includes(gs.gun)) gs.gun = Gunsmith.guns(g)[0];
     if (!Gunsmith.part(gs.gun, gs.part)) gs.part = GUN_PARTS[gs.gun].parts[0].id; // pièce d'une autre arme : on revient à la première
-    const touch = Input.mode === 'touch', def = GUN_PARTS[gs.gun], guns = Gunsmith.guns(g);
-    const roman = ['0', 'I', 'II', 'III'];
-    const gunTabs = guns.length > 1 ? `<div class="gs-guns">${guns.map(id => `<button class="${id === gs.gun ? 'on' : ''}" data-action="gsGun" data-id="${id}">${GUN_PARTS[id].icon} ${GUN_PARTS[id].name}</button>`).join('')}</div>` : '';
-    const tabs = `<div class="gs-tabs">${[['parts', '🔧 Pièces'], ['arms', '🎒 Armes'], ['paint', '🎨 Peinture']].map(([id, nm]) => `<button class="${gs.tab === id ? 'on' : ''}" data-action="gsTab" data-tab="${id}">${nm}</button>`).join('')}</div>`;
+    const touch = Input.mode === 'touch', def = GUN_PARTS[gs.gun], P = PRIMARIES[g.primary] || PRIMARIES.rifle;
+    const roman = ['0', 'I', 'II', 'III', 'IV'], gunTabs = '';
+    const tabs = `<div class="gs-tabs">${[['parts', `${P.icon} Arme principale`], ['gear', '🎒 Équipement'], ['paint', '🎨 Peinture']].map(([id, nm]) => `<button class="${gs.tab === id ? 'on' : ''}" data-action="gsTab" data-tab="${id}">${nm}</button>`).join('')}</div>`;
     let body;
-    if (gs.tab === 'arms') {
-      // armes secondaires : acheter (4 max), monter de niveau (1→5), puis évolution
-      const rows = Object.entries(WEAPONS).map(([id, w]) => {
-        const own = g.weapons[id], o = Gunsmith.weaponOffer(g, id), evo = EVOLUTIONS.find(e => e.weapon === id);
+    if (gs.tab === 'gear') {
+      // létal + tactique de la classe : niveaux 1→5, puis évolution
+      const L = g.loadout || {}, rows = [[L.secondary, 'Secondaire', 'next'], [L.lethal, 'Létal', 'grenade'], [L.tactical, 'Tactique', 'mine']].filter(([id]) => id && WEAPONS[id]).map(([id, slot, key]) => {
+        const w = WEAPONS[id], own = g.weapons[id], o = Gunsmith.weaponOffer(g, id), evo = EVOLUTIONS.find(e => e.weapon === id);
         const pips = Array.from({ length: w.max }, (_, k) => `<i class="${own && k < own.lvl ? 'on' : ''}"></i>`).join('');
-        const type = w.type === 'main' ? 'à équiper' : w.type === 'manual' ? `touche ${Inventory.label(id === 'mines' ? 'mine' : id)}` : 'automatique';
-        const desc = !own ? w.desc(0) : o.kind === 'level' ? `Niv. ${own.lvl + 1} : ${w.desc(own.lvl)}` : o.kind === 'evo' ? `${evo.icon} ${evo.name} : ${evo.desc.replace(/^ÉVOLUTION : /, '')}` : own.evo ? `${evo.icon} ${evo.name}` : 'Niveau maximum';
-        const btn = o.kind === 'full' ? `<span class="lock">${MAX_SIDE_WEAPONS} armes max</span>`
-          : o.kind === 'max' ? '<span class="tagline ok">✔ MAX</span>'
-          : `<button class="btn small ${o.kind === 'evo' ? 'evo' : ''}" data-action="gsWeapon" data-id="${id}" ${g.coins < o.cost ? 'disabled' : ''}>${o.kind === 'buy' ? 'Acheter' : o.kind === 'evo' ? 'Évoluer' : 'Niv. +1'} · ${o.cost} 🔩</button>`;
-        return `<div class="gs-arm ${own ? 'own' : ''} ${own && own.evo ? 'evo' : ''}">
+        const type = w.type === 'manual' || w.type === 'secondary' ? `${slot} · touche ${Inventory.label(key)}` : `${slot} · automatique`;
+        const desc = o.kind === 'level' ? `Niv. ${own.lvl + 1} : ${w.desc(own.lvl)}` : o.kind === 'evo' ? `${evo.icon} ${evo.name} : ${evo.desc.replace(/^ÉVOLUTION : /, '')}` : own && own.evo && evo ? `${evo.icon} ${evo.name}` : 'Niveau maximum';
+        const btn = o.kind === 'max' || o.kind === 'none' ? '<span class="tagline ok">✔ MAX</span>'
+          : `<button class="btn small ${o.kind === 'evo' ? 'evo' : ''}" data-action="gsWeapon" data-id="${id}" ${g.coins < o.cost ? 'disabled' : ''}>${o.kind === 'evo' ? 'Évoluer' : 'Niv. +1'} · ${o.cost} 🔩</button>`;
+        return `<div class="gs-arm own ${own && own.evo ? 'evo' : ''}">
           <span class="ic">${own && own.evo && evo ? evo.icon : w.icon}</span>
-          <span class="txt"><b>${w.name} <small>· ${type}</small></b><span class="cur">${desc}</span>${own ? `<span class="pips">${pips}</span>` : ''}</span>
+          <span class="txt"><b>${w.name} <small>· ${type}</small></b><span class="cur">${desc}</span><span class="pips">${pips}</span></span>
           ${btn}
         </div>`;
       }).join('');
-      body = `<p class="hint">Armes en plus de votre fusil (${Weapons.sideCount(g)} / ${MAX_SIDE_WEAPONS}). Au niveau ${WEAPONS.shotgun.max}, une arme peut <b>évoluer</b>.</p><div class="gs-arms">${rows}</div>`;
-    } else if (gs.tab === 'parts') {
+      body = `<p class="hint">L'arme secondaire et l'équipement de votre classe « ${(g.loadout && g.loadout.name) || ''} ». Au niveau 5, le létal et le tactique peuvent <b>évoluer</b>.</p><div class="gs-arms">${rows}</div>`;    } else if (gs.tab === 'parts') {
       const sel = Gunsmith.part(gs.gun, gs.part), selL = Gunsmith.lvl(g, gs.gun, gs.part);
       // barres de caractéristiques : actuel + gain de la pièce sélectionnée (en vert)
-      const now = Gunsmith.stats(g, gs.gun), next = selL < 3 ? Gunsmith.stats(g, gs.gun, gs.part) : now;
+      const selMax = Gunsmith.maxOf(sel), now = Gunsmith.stats(g, gs.gun), next = selL < selMax ? Gunsmith.stats(g, gs.gun, gs.part) : now;
       const fmt = (v, u) => (u === '%' || u === '°' ? `${Math.round(v)}${u === '%' ? ' %' : '°'}` : v >= 20 ? Math.round(v) : Math.round(v * 10) / 10);
       const bars = now.map(([n, v, max, u], i) => {
         const nv = next[i][1], a = U.clamp(v / max, 0.03, 1), b = U.clamp(nv / max, 0.03, 1), up = nv > v + 1e-6;
         return `<div class="gs-stat ${up ? 'up' : ''}"><span>${n}</span><div class="gs-bar"><i style="width:${a * 100}%"></i>${up ? `<em style="left:${a * 100}%;width:${(b - a) * 100}%"></em>` : ''}</div><b>${fmt(v, u)}${up ? ` <small>→ ${fmt(nv, u)}</small>` : ''}</b></div>`;
       }).join('');
       const rows = def.parts.map(pt => {
-        const l = Gunsmith.lvl(g, gs.gun, pt.id), on = pt.id === gs.part, cost = l < 3 ? Gunsmith.partCost(g, l) : 0;
-        const pips = [1, 2, 3].map(k => `<i class="${k <= l ? 'on' : ''}"></i>`).join('');
-        return `<button class="gs-part ${on ? 'on' : ''} ${l >= 3 ? 'max' : ''}" data-action="gsPart" data-id="${pt.id}" data-gs-hover="${pt.id}">
+        const l = Gunsmith.lvl(g, gs.gun, pt.id), mx = Gunsmith.maxOf(pt), on = pt.id === gs.part, cost = l < mx ? Gunsmith.partCost(g, l) : 0, lk = l < mx && !Gunsmith.levelOk(g, l + 1);
+        const pips = Array.from({ length: mx }, (_, k) => `<i class="${k < l ? 'on' : ''}"></i>`).join('');
+        return `<button class="gs-part ${on ? 'on' : ''} ${l >= mx ? 'max' : ''}" data-action="gsPart" data-id="${pt.id}" data-gs-hover="${pt.id}">
           <span class="ic">${pt.icon}</span>
           <span class="txt"><b>${pt.name} <small>· ${pt.stat}</small></b><span class="cur">${pt.lv[l]}</span></span>
           <span class="pips">${pips}</span>
-          <span class="price">${l >= 3 ? 'MAX' : `${cost} 🔩`}</span>
+          <span class="price">${l >= mx ? 'MAX' : lk ? `🔒 Arme niv. ${Gunsmith.partReq(l + 1)}` : `${cost} 🔩`}</span>
         </button>`;
       }).join('');
-      const selCost = selL < 3 ? Gunsmith.partCost(g, selL) : 0, can = selL < 3 && g.coins >= selCost;
-      const detail = selL < 3
-        ? `<div class="gs-next"><div><span class="lbl">Niveau ${roman[selL + 1]} · ${sel.lv[selL + 1]}</span><span class="fx">${sel.fx}</span></div>
-            <button class="btn small" data-action="gsBuy" data-id="${sel.id}" ${can ? '' : 'disabled'}>${can ? 'Monter' : 'Pas assez'} · ${selCost} 🔩</button></div>`
-        : `<div class="gs-next max"><span class="lbl">✔ ${sel.lv[3]} · pièce au maximum</span></div>`;
-      body = `<div class="gs-stats">${bars}</div>${detail}<div class="gs-parts">${rows}</div>`;
+      const selCost = selL < selMax ? Gunsmith.partCost(g, selL) : 0, selOk = selL < selMax && Gunsmith.levelOk(g, selL + 1), can = selOk && g.coins >= selCost;
+      const WL = Progress.wLevel(g.primary, g);
+      const detail = selL < selMax
+        ? `<div class="gs-next"><div><span class="lbl">Niveau ${roman[selL + 1]} · ${sel.lv[selL + 1]}</span><span class="fx">${selOk ? sel.fx : `🔒 Niveau d'arme ${Gunsmith.partReq(selL + 1)} requis (actuel : ${WL.lvl})`}</span></div>
+            <button class="btn small" data-action="gsBuy" data-id="${sel.id}" ${can ? '' : 'disabled'}>${!selOk ? '🔒 Verrouillé' : can ? 'Monter' : 'Pas assez'} · ${selCost} 🔩</button></div>`
+        : `<div class="gs-next max"><span class="lbl">✔ ${sel.lv[selMax]} · pièce au maximum</span></div>`;
+      const wl = `<p class="hint">⬆️ ${P.name} · <b>niveau d'arme ${WL.lvl}</b>${WL.max ? ' (max)' : ` · ${WL.kills} / ${WL.next} éliminations`} · pièces III au niveau 3, IV au niveau 5</p>`;
+      body = `<div class="gs-stats">${bars}</div>${detail}${wl}<div class="gs-parts">${rows}</div>`;
     } else {
       const S = Save.data, eq = Cosmetics.eq('weapon'), cur = gs.skin || eq.id;
       const rows = COSMETICS.filter(c => c.slot === 'weapon').map(it => {
@@ -558,14 +670,15 @@ const UI = {
     }
     const inner = `
       <div class="gs-head">
-        <div><h2>${BENCHES[gs.bench] && BENCHES[gs.bench].big ? '🔫 Armurerie' : '🔧 Établi'}</h2><span class="sub">${gs.tab === 'arms' ? 'Vos armes' : `${def.icon} ${def.name}`} · partie en pause</span></div>
+        <div><h2>🔧 Établi</h2><span class="sub">${gs.tab === 'gear' ? 'Équipement de la classe' : `${P.icon} ${P.name}`} · partie en pause</span></div>
         <span class="bank">🔩 <b>${g.coins}</b></span>
       </div>
       ${gunTabs}${tabs}
+      ${g.tut ? `<p class="hint tut-hint">🎓 Choisissez une pièce, achetez-la avec « Monter » : elle apparaît sur l'arme. Puis « Reprendre ».</p>` : ''}
       <div class="gs-body">${body}</div>
       <div class="gs-foot">
         <button class="btn" data-action="gsClose">▶ Reprendre${touch ? '' : ` <span class="muted">(Échap)</span>`}</button>
-        ${touch ? '<span class="hint">Faites glisser l\'arme pour la tourner</span>' : '<span class="hint">↑↓ pièce · Entrée acheter · ←→ arme · Tab peinture · glisser pour tourner</span>'}
+        ${touch ? '<span class="hint">Faites glisser l\'arme pour la tourner</span>' : '<span class="hint">↑↓ pièce · Entrée acheter · Tab onglet suivant · glisser pour tourner</span>'}
       </div>`;
     const panel = this.screen === 'gunsmith' && this.el.querySelector('.panel.gunsmith');
     if (panel) { const sc = panel.querySelector('.gs-body').scrollTop; panel.innerHTML = inner; panel.querySelector('.gs-body').scrollTop = sc; }
@@ -588,6 +701,7 @@ const UI = {
     this.open(`
       <h2>${def.icon} ${def.name}</h2>
       ${heal}
+      ${g.tut ? `<p class="hint tut-hint">🎓 Ici, la ferraille sert à survivre : soins, vie max, armure, objets à poser. Pendant une vague, la horde frappe la porte : si elle cède, il faut fuir. Sortez pour continuer.</p>` : ''}
       <div class="door"><span class="door-lbl">Porte tenue</span><div class="door-bar"><i style="width:${sh.hp / sh.max * 100}%"></i></div></div>
       <div class="bank">🔩 Ferraille : <b class="sh-coins">${g.coins}</b></div>
       <div class="cards">${items}</div>
@@ -613,29 +727,21 @@ const UI = {
   showGameOver(g, best, isNewBest, banked, newAch) {
     this.screen = 'main';
     const s = g.stats, bank = Save.data.bank;
-    // ce que la ferraille versée vient de rendre achetable (et ce qui l'était déjà)
-    const before = new Set(this.affordable(bank - banked).map(i => i.name));
-    const now = this.affordable(bank), fresh = now.filter(i => !before.has(i.name));
-    const cheap = this.cheapest();
-    let tip = '';
-    if (fresh.length) tip = `<div class="unlock-tip"><b>💡 Nouveau à l'Entraînement</b>${fresh.slice(0, 3).map(i => `<span>${i.icon} ${i.name} · ${i.cost} 🔩</span>`).join('')}${fresh.length > 3 ? `<span class="muted">+ ${fresh.length - 3} autre(s)</span>` : ''}</div>`;
-    else if (now.length) tip = `<div class="unlock-tip"><b>💡 Toujours achetable</b><span>${now[0].icon} ${now[0].name} · ${now[0].cost} 🔩</span></div>`;
-    else if (cheap) tip = `<p class="hint center">Encore <b>${cheap.cost - bank} 🔩</b> pour ${cheap.it.icon} ${cheap.it.name} à l'Entraînement.</p>`;
     this.open(`
       <h2>${g.victory ? 'Partie terminée · survivante !' : 'La horde vous a eue'}</h2>
       <p class="who center">${Cosmetics.playerName()} · <span>${Cosmetics.title()}</span></p>
       ${isNewBest ? '<p class="newbest">🏆 Nouveau record !</p>' : g.boardRank && g.boardRank <= 10 ? `<p class="newbest">🏅 ${g.boardRank}${g.boardRank === 1 ? 're' : 'e'} meilleure partie</p>` : ''}
+      ${this.deathBlock(g)}
       <div class="stats reveal">${this.runStats(g).map(([n, v, cnt], i) => `<div style="--d:${0.25 + i * 0.13}s"><span>${n}</span><b ${cnt != null ? `data-count="${cnt}"` : ''}>${v}</b></div>`).join('')}</div>
       ${this.xpBlock(g.progress)}
       <p class="banked">+${banked} 🔩 versés dans la réserve (total ${bank})</p>
       ${g.reviveFromBank ? `<p class="hint center">💉 Réanimations payées avec la réserve pendant la partie : −${g.reviveFromBank} 🔩</p>` : ''}
       <p class="hint center">${g.victory ? 'Évasion réussie : toute la ferraille est conservée.' : `Vague ${g.wave.num} atteinte : ${Math.round(g.bankShare * 100)} % de la ferraille conservée${g.coinsLost ? ` (${g.coinsLost} 🔩 perdus)` : ''}. Plus vous tenez, plus vous gardez.`}</p>
-      ${tip}
       ${newAch.length ? `<div class="chips">${newAch.map(a => `<span class="chip evo">${a.icon} ${a.name}</span>`).join('')}</div>` : ''}
       ${this.buildChips(g)}
       <button class="btn" data-action="play">Rejouer</button>
       <div class="menu-grid two">
-        <button class="btn small ${now.length ? 'glow' : 'ghost'}" data-action="shop">💪 Entraînement</button>
+        <button class="btn small ghost" data-action="classes">🎖️ Classes</button>
         <button class="btn small ghost" data-action="menu">🧍 Préparation</button>
       </div>
       <p class="best">Record : <b>${best.score}</b> pts · vague ${best.wave}</p>
@@ -643,9 +749,37 @@ const UI = {
     this.animateSummary(g.progress);
   },
 
+  /** Cause de la mort : dernier coup, zombies autour, origine des dégâts subis, conseil */
+  deathBlock(g) {
+    const D = g.death;
+    if (!D || g.victory || g.noRevive) return '';
+    const H = Object.values(g.stats.hurtBy || {}).sort((a, b) => b.d - a.d), tot = H.reduce((a, h) => a + h.d, 0) || 1;
+    const src = H.slice(0, 3).map(h => `<span>${h.ic} ${h.n} <b>${Math.round(h.d / tot * 100)} %</b></span>`).join('');
+    const roll = Input.mode === 'touch' ? 'le bouton de roulade' : `la roulade (${Inventory.label('roll')})`;
+    const kind = D.k.split('_')[0], bt = D.k.split('_')[1], boss = !!(bt && ENEMY_TYPES[bt] && ENEMY_TYPES[bt].boss);
+    const TIPS = {
+      melee: `Gardez vos distances : ${roll} traverse la horde sans prendre de coups.`,
+      spit: `Les crachats se voient venir : ${roll} au bon moment les esquive.`,
+      kamikaze: 'Les kamikazes (orange) explosent au contact : abattez-les de loin, ou ciblez-les en priorité.',
+      barrel: 'Les fûts blessent aussi la survivante : éloignez-vous avant de les faire sauter.',
+      acid: 'Les flaques vertes brûlent : ne restez pas dedans.',
+      fire: 'Le Brûleur laisse des brasiers derrière lui : tournez autour sans marcher dans ses traces.',
+    };
+    const tip = D.around >= 8 ? `${D.around} zombies vous entouraient : restez en mouvement, ne vous laissez pas coincer contre un mur.`
+      : boss ? `Les boss frappent fort : tournez autour d'eux et gardez une charge de roulade en réserve.` : TIPS[kind] || '';
+    const n = (Save.data.deathBy || {})[D.k] || 0;
+    return `<div class="death-box">
+      <div class="dh"><span>💀 Cause de la mort</span><b>${D.ic} ${D.n}</b>${D.around >= 5 ? `<small>${D.around} zombies autour de vous</small>` : ''}</div>
+      ${src ? `<div class="dsrc"><small>Dégâts subis pendant la partie</small>${src}</div>` : ''}
+      ${tip ? `<p class="hint">💡 ${tip}</p>` : ''}
+      ${n > 1 ? `<p class="hint">C'est la ${n}ᵉ fois que cette cause vous élimine.</p>` : ''}
+    </div>`;
+  },
+
   /** Statistiques de la partie (nom, valeur affichée, valeur à compter) */
   runStats(g) {
-    const s = g.stats, names = { rifle: 'Fusil d\'assaut', shotgun: 'Fusil à pompe', flamer: 'Lance-flammes', boom: 'Explosions', drone: 'Drone', turret: 'Tourelles', trap: 'Barbelés', dog: 'Rex' };
+    const s = g.stats, names = { rifle: (PRIMARIES[g.primary] || PRIMARIES.rifle).name, shotgun: 'Fusil à pompe', flamer: 'Lance-flammes', boom: 'Explosions', drone: 'Drone', turret: 'Tourelles', trap: 'Barbelés', dog: 'Rex', ally: 'Survivants' };
+    for (const [id, S] of Object.entries(SECONDARIES)) names[id] = S.name;
     const fav = Object.entries(s.dmgBy || {}).sort((a, b) => b[1] - a[1])[0];
     const fmt = n => n >= 10000 ? `${Math.round(n / 1000)} k` : String(Math.round(n));
     return [
@@ -666,6 +800,8 @@ const UI = {
         <div class="xp-bar"><i style="--from:${from}%;--to:${to}%"></i></div>
         ${up ? `<div class="xp-after">Niveau ${P.lvl1} · ${P.xp1} / ${need1} XP</div>` : `<div class="xp-after">${P.xp1} / ${need1} XP</div>`}
         ${levels}${ms ? `<div class="mis-list"><b>🎯 Missions accomplies</b>${ms}</div>` : ''}
+        ${(P.weapons || []).length ? `<div class="mis-list"><b>⬆️ Armes</b>${P.weapons.map(w => `<div class="mis-done"><span>${(PRIMARIES[w.id] || SECONDARIES[w.id]).icon} ${w.name} · +${w.kills} élim.</span><b>${w.lvl1 > w.lvl0 ? `niv. ${w.lvl0} → ${w.lvl1} !` : `niv. ${w.lvl1}`}</b></div>`).join('')}</div>` : ''}
+        ${(P.camos || []).map(c => `<div class="lvl-up"><b>🎨 CAMOUFLAGE DÉBLOQUÉ</b><span>${c.icon} ${c.name} · ${c.wchal.t}</span></div>`).join('')}
       </div>`;
   },
   /** Les chiffres défilent (comptent jusqu'à leur valeur) */

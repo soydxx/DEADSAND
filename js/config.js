@@ -58,7 +58,9 @@ const CONFIG = {
   },
 
   waveClearBonus: 25,           // points × numéro de vague
-  waveScrap: { base: 25, perWave: 8 }, // prime de ferraille en fin de vague (à dépenser aux établis / refuges)
+  waveScrap: { base: 25, perWave: 6, capWave: 12 }, // prime de fin de vague : 25 + 6 × vague (plafonnée à la vague 12)
+  // ferraille des zombies : pleine jusqu'à la vague 8, puis −5 % par vague (45 % minimum) → plus de « farm » en fin de partie
+  scrapFade: { from: 8, perWave: 0.05, min: 0.45 },
   screenShake: true,
   maxParticles: 700,
 };
@@ -125,6 +127,12 @@ const ENEMY_TYPES = {
     hp: 38, speed: 82, radius: 12, damage: 14, burrowSpeed: 150,
     color: '#8a6a3a', coins: 2, score: 30,
   },
+  // Grimpeur : passe par-dessus les toits et les véhicules (hors d'atteinte des balles tant qu'il est perché)
+  climber: {
+    name: 'Grimpeur', behavior: 'climber', model: 'climber', climb: true,
+    hp: 34, speed: 105, radius: 11, damage: 12,
+    color: '#6a7a8a', coins: 2, score: 30,
+  },
   boss: {
     name: 'Le Mastodonte', behavior: 'boss', model: 'behemoth', boss: true,
     hp: 900, speed: 48, radius: 40, damage: 30, knockbackResist: 1,
@@ -153,9 +161,23 @@ const ENEMY_TYPES = {
     fireCooldown: 1.5, bulletSpeed: 210, bulletDamage: 12, bulletColor: '#b8d84a', acid: true,
     color: '#8a9a2a', coins: 30, score: 500,
   },
+  // Le Brûleur : lance des bombes incendiaires (brasiers au sol) et laisse une traînée de feu derrière lui
+  burner: {
+    name: 'Le Brûleur', behavior: 'burner', model: 'burner', boss: true,
+    hp: 950, speed: 50, radius: 34, damage: 30, knockbackResist: 1,
+    fireCooldown: 2.2, bulletSpeed: 260, bulletDamage: 12, bulletColor: '#ff7a1a',
+    color: '#c8602a', coins: 30, score: 500,
+  },
+  // L'Abomination : frappe le sol (onde de choc annoncée) ; à sa mort, se divise en brutes et en coureurs
+  abomination: {
+    name: 'L\'Abomination', behavior: 'abomination', model: 'abomination', boss: true,
+    hp: 1250, speed: 44, radius: 44, damage: 36, knockbackResist: 1,
+    slamEvery: 3.6, slamRadius: 135, slamDamage: 26, splits: { tank: 3, fast: 6 },
+    color: '#7a5a8a', coins: 30, score: 500,
+  },
 };
 /** Boss de la vague n (toutes les 5 vagues, à tour de rôle) */
-const BOSS_ORDER = ['boss', 'queen', 'charger', 'spewer'];
+const BOSS_ORDER = ['boss', 'queen', 'burner', 'charger', 'spewer', 'abomination'];
 const bossFor = n => BOSS_ORDER[(Math.floor(n / 5) - 1) % BOSS_ORDER.length];
 
 /* ---------------------------------------------------------------------
@@ -183,6 +205,7 @@ const WAVE_CONFIG = {
     howler: w >= 6 ? 0.8 + w * 0.12 : 0,
     shield: w >= 8 ? 0.8 + w * 0.2 : 0,
     burrower: w >= 9 ? 1 + w * 0.2 : 0,
+    climber: w >= 8 ? 0.8 + w * 0.2 : 0,
   }),
   // zombies élites dorés (×3 PV, ×5 ferraille) à partir de la vague 6
   eliteChance: w => (w >= 6 ? Math.min(0.12, 0.03 + (w - 6) * 0.006) : 0),
@@ -216,12 +239,15 @@ const CHARACTERS = {
   // débloquée en réparant la voiture (succès « Évadée ! ») : capacité spéciale d'atelier
   mechanic: { name: 'Vega', role: 'Mécano', desc: 'Établis −25 %, une tourelle offerte au départ, +10 % de ferraille.', model: 'survivor', cost: 0, unlock: 'escape', palette: 'mechanic',
     apply: p => { p.benchDiscount = 0.25; p.scrapMult *= 1.1; } },
+  // 5ᵉ personnage : la médecin, qui se soigne mieux que les autres
+  medic: { name: 'Nora', role: 'Médecin', desc: '+1 réanimation offerte, trousses et soins ×1,5, Rations deux fois plus longues, −10 PV.', model: 'scout', cost: 700, palette: 'medic',
+    apply: p => { p.freeRevives = (p.freeRevives || 0) + 1; p.healMult = 1.5; p.regenPoolMult = 2; p.maxHp -= 10; p.hp = p.maxHp; } },
 };
 /** Personnage disponible ? (acheté, ou débloqué par un succès) */
 const charOwned = id => !!(Save.data.chars[id] || (CHARACTERS[id].unlock && Save.data.ach[CHARACTERS[id].unlock]));
 
 /* ---------------------------------------------------------------------
-   ENTRAÎNEMENT : améliorations permanentes du PERSONNAGE (vie, vitesse, réanimations, Rex),
+   ANCIEN ENTRAÎNEMENT (retiré du jeu) : ne sert plus qu'à rembourser la réserve des joueurs qui l'avaient utilisé,
    achetées avec la ferraille en réserve. Les armes s'améliorent aux établis, pendant la partie.
    apply : (player, niveau) au début de chaque partie
    --------------------------------------------------------------------- */
@@ -256,7 +282,7 @@ const ACHIEVEMENTS = [
   { id: 'boom', icon: '🛢️', name: "Feu d'artifice", desc: 'Faire exploser 10 fûts en une partie', test: g => g.stats.barrels >= 10 },
   { id: 'evo', icon: '✨', name: 'Évolution', desc: 'Obtenir une arme évoluée', test: g => g.stats.evolved >= 1 },
   { id: 'elite', icon: '👑', name: 'Or massif', desc: 'Abattre un zombie élite', test: g => g.stats.elites >= 1 },
-  { id: 'arsenal', icon: '🗃️', name: 'Arsenal', desc: 'Posséder 3 armes secondaires en même temps', test: g => g.weapons && Weapons.sideCount(g) >= 3 },
+  { id: 'arsenal', icon: '🗃️', name: 'Armurier', desc: 'Monter 10 pièces d\'arme en une partie', test: g => (g.stats.mods || 0) >= 10 },
   { id: 'roll', icon: '🤸', name: 'Insaisissable', desc: 'Faire 50 roulades en une partie', test: g => g.stats.rolls >= 50 },
   { id: 'rich', icon: '💰', name: 'Ferrailleur', desc: 'Avoir 1000 ferraille en réserve', test: (g, S) => S.bank >= 1000 },
   { id: 'zone', icon: '🗺️', name: 'Explorateur', desc: 'Ouvrir toutes les zones de la carte', test: g => (g.zonesOpened || 0) >= 3 },

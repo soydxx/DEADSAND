@@ -1,10 +1,10 @@
 'use strict';
 /* =====================================================================
-   ARMES SECONDAIRES (en plus du fusil d'assaut automatique)
-   Chaque arme : niveaux 1→5 (stats(l)), description par niveau, et une
-   ÉVOLUTION achetable quand l'arme est au niveau 5.
-   Tout s'achète aux établis (onglet « Armes », js/gunsmith.js).
-   Leurs dégâts profitent des bonus de dégâts du fusil (chargeur de l'établi…).
+   ARMES ET ÉQUIPEMENTS (choisis dans la classe, js/loadout.js)
+   - fusil à pompe / lance-flammes : armes principales (les fusils utilisent p.weapon, entities.js)
+   - létal (grenade, molotov, mines) et tactique (drone, tourelle, barbelés) : niveaux 1→5 puis
+     une ÉVOLUTION, achetés aux établis (onglet « Équipement », js/gunsmith.js).
+   Leurs dégâts profitent des bonus de dégâts de l'arme principale (chargeur de l'établi…).
    ===================================================================== */
 
 /* type : 'main'    → arme qu'on équipe à la place du fusil d'assaut (touches / inventaire)
@@ -31,6 +31,30 @@ const WEAPONS = {
     stats: l => ({ count: l >= 4 ? 2 : 1, cd: 0.9 * Math.pow(0.9, l - 1), dmg: 9 * (1 + 0.2 * (l - 1)), range: 300 }),
     desc: l => (l === 0 ? 'Nouvelle arme : un drone tourne autour de vous et tire seul' : l === 3 ? '+1 drone, +20 % dégâts' : '+20 % dégâts, tire plus vite'),
   },
+  molotov: {
+    name: 'Cocktail Molotov', icon: '🍾', max: 5, type: 'manual',
+    stats: l => ({ cd: 7 * Math.pow(0.92, l - 1), count: 1, radius: 55 + l * 5, dmg: 18 * (1 + 0.2 * (l - 1)), range: 300, fire: 5 + l * 0.5 }),
+    desc: l => (l === 0 ? 'Petite explosion puis un brasier qui brûle la horde' : '+20 % dégâts, brasier plus grand et plus long, recharge plus courte'),
+  },
+  turretkit: {
+    name: 'Tourelle portable', icon: '🗼', max: 5, type: 'manual',
+    stats: l => ({ cd: 40 * Math.pow(0.9, l - 1), life: 22 + l * 4 }),
+    desc: l => (l === 0 ? 'Pose une tourelle automatique devant vous' : 'Recharge plus courte, la tourelle tient plus longtemps'),
+  },
+  wirekit: {
+    name: 'Barbelés portables', icon: '🕸️', max: 5, type: 'manual',
+    stats: l => ({ cd: 24 * Math.pow(0.88, l - 1) }),
+    desc: l => (l === 0 ? 'Déroule des barbelés qui ralentissent et blessent' : 'Recharge plus courte'),
+  },
+  /* armes secondaires (js/loadout.js, SECONDARIES) : le tir est géré par entities.js, ici seulement les niveaux de l'établi */
+  pistol: { name: 'Pistolet', icon: '🔫', max: 5, type: 'secondary',
+    stats: l => ({ dmg: 8 * (1 + 0.2 * (l - 1)), rate: 2.6 * (1 + 0.06 * (l - 1)) }), desc: () => '+20 % dégâts, +6 % cadence' },
+  revolver: { name: 'Revolver', icon: '🤠', max: 5, type: 'secondary',
+    stats: l => ({ dmg: 28 * (1 + 0.2 * (l - 1)), rate: 1.0 * (1 + 0.06 * (l - 1)) }), desc: () => '+20 % dégâts, +6 % cadence' },
+  mpistol: { name: 'Pistolet-mitrailleur', icon: '⚡', max: 5, type: 'secondary',
+    stats: l => ({ dmg: 4.5 * (1 + 0.2 * (l - 1)), rate: 6 * (1 + 0.06 * (l - 1)) }), desc: () => '+20 % dégâts, +6 % cadence' },
+  flaregun: { name: 'Lance-fusées', icon: '🎆', max: 5, type: 'secondary',
+    stats: l => ({ dmg: 14 * (1 + 0.2 * (l - 1)), rate: 0.85 * (1 + 0.06 * (l - 1)) }), desc: () => '+20 % dégâts et brûlure, +6 % cadence' },
   mines: {
     name: 'Mines', icon: '☢️', max: 5, type: 'manual',
     // rééquilibrées (jugées trop fortes) : recharge plus longue, dégâts et rayon réduits, 3 sur le terrain, durée de vie 30 s
@@ -44,6 +68,9 @@ const EVOLUTIONS = [
   { id: 'evo_drone', weapon: 'drone', icon: '🐝', name: 'Essaim de drones', desc: 'ÉVOLUTION : +2 drones qui tirent deux fois plus vite', requires: { w_drone: 3, firerate: 2 } },
   { id: 'evo_shotgun', weapon: 'shotgun', icon: '🌪️', name: 'Canon à mitraille', desc: 'ÉVOLUTION : deux fois plus de plombs, qui traversent les zombies', requires: { w_shotgun: 3, multishot: 1 } },
   { id: 'evo_flamer', weapon: 'flamer', icon: '🐉', name: 'Souffle du dragon', desc: 'ÉVOLUTION : portée ×1,6, cône élargi, dégâts ×1,5', requires: { w_flamer: 3, range: 1 } },
+  { id: 'evo_molotov', weapon: 'molotov', icon: '☄️', name: 'Napalm', desc: 'ÉVOLUTION : brasier deux fois plus grand et plus brûlant' },
+  { id: 'evo_turretkit', weapon: 'turretkit', icon: '🏰', name: 'Tourelles jumelles', desc: 'ÉVOLUTION : pose deux tourelles à la fois' },
+  { id: 'evo_wirekit', weapon: 'wirekit', icon: '⛓️', name: 'Champ de barbelés', desc: 'ÉVOLUTION : déroule deux barbelés à la fois' },
   { id: 'evo_mines', weapon: 'mines', icon: '💠', name: 'Champ de mines', desc: 'ÉVOLUTION : les mines tombent par 2, explosent plus fort, 5 sur le terrain', requires: { w_mines: 3, magnet: 1 } },
 ];
 
@@ -82,7 +109,7 @@ const Weapons = {
     const max = this.minesMax(g);
     if (g.mines.length >= max) { Entities.addText(g, p.x, p.y - 30, `${max} mines max sur le terrain`, '#ff6a5a', 13); return false; }
     const s = WEAPONS.mines.stats(w.lvl);
-    w.t = s.cd; w.cdMax = s.cd;
+    w.t = w.cdMax = s.cd * (p.equipCd || 1); // atout Ingénieur
     const n = Math.min(w.evo ? 2 : 1, max - g.mines.length);
     for (let i = 0; i < n; i++) {
       const a = p.aimAngle + Math.PI + (i - (n - 1) / 2) * 0.9, d = n > 1 ? 30 : 8;
@@ -104,10 +131,10 @@ const Weapons = {
   sideCount(g) { return Object.keys(g.weapons).filter(id => !WEAPONS[id].starter).length; },
 
   /** Lance une grenade : cible verrouillée, sinon le curseur (PC), sinon le zombie le plus proche, sinon droit devant */
-  throwGrenade(g) {
-    const w = g.weapons.grenade, p = g.player;
+  throwGrenade(g, id = 'grenade') {
+    const w = g.weapons[id], p = g.player;
     if (!w || w.t > 0 || p.inside) return false;
-    const s = WEAPONS.grenade.stats(w.lvl), R = s.range;
+    const s = WEAPONS[id].stats(w.lvl), R = s.range;
     let tx, ty;
     const L = g.lock, cur = Input.mode === 'keyboard' && typeof Render !== 'undefined' && Render.cursorWorld ? Render.cursorWorld() : null;
     if (L && !L.dead && U.dist2(p.x, p.y, L.x, L.y) < R * R * 1.4) { tx = L.x; ty = L.y; }
@@ -116,18 +143,21 @@ const Weapons = {
     // portée maximale
     const dx = tx - p.x, dy = ty - p.y, d = Math.hypot(dx, dy);
     if (d > R) { tx = p.x + dx / d * R; ty = p.y + dy / d * R; }
-    w.t = s.cd; w.cdMax = s.cd;
+    w.t = w.cdMax = s.cd * (p.equipCd || 1);
+    const fire = id === 'molotov' ? { t: s.fire * (w.evo ? 1.3 : 1), r: s.radius * (w.evo ? 1.7 : 1.1), dps: s.dmg * (w.evo ? 1.6 : 1) } : w.evo ? { t: 3, r: s.radius * 0.75, dps: s.dmg * 0.45 } : null;
     for (let i = 0; i < s.count; i++) {
       const sx = i ? U.rand(-30, 30) : 0, sy = i ? U.rand(-30, 30) : 0;
       g.grenades.push({ x0: p.x, y0: p.y, x: p.x, y: p.y, tx: tx + sx, ty: ty + sy, t: -i * 0.12, dur: 0.55 + Math.min(d, R) / R * 0.35,
-        r: s.radius, dmg: s.dmg * this.dmgMult(g), evo: w.evo, z: 0 });
+        r: s.radius, dmg: s.dmg * this.dmgMult(g), fire, molotov: id === 'molotov', z: 0 });
     }
     p.aimAngle = Math.atan2(dy, dx);
     Sfx.play('throw');
     return true;
   },
 
-  dmgMult(g) { return g.player.weapon.damage / CONFIG.player.weapon.damage; },
+  /** Bonus de dégâts de l'équipement : personnage, atouts et pièces de l'établi, mais pas les dégâts propres
+      de l'arme principale (sinon les grenades du fusil de précision faisaient ×3,5) */
+  dmgMult(g) { return g.player.weapon.damage / (g.player.dmgBase || CONFIG.player.weapon.damage); },
 
   roll(g, base) { // critique partagé avec le fusil principal
     const w = g.player.weapon, crit = Math.random() < w.critChance;
@@ -144,7 +174,8 @@ const Weapons = {
     const p = g.player;
     for (const [id, w] of Object.entries(g.weapons)) {
       const type = WEAPONS[id].type;
-      if (type === 'main' && g.active !== id) { w.t = Math.min(w.t, 0.25); continue; } // rangée dans l'inventaire
+      if (type === 'secondary') continue; // tir géré avec le fusil (entities.js)
+      if (type === 'main' && (g.active !== id || g.swapT > 0)) { w.t = Math.min(w.t, 0.25); continue; } // rangée dans l'inventaire
       const s = WEAPONS[id].stats(w.lvl);
       if (type === 'main') { Gunsmith.tune(g, id, s); if (s.cd && Fun.on(g, 'frenzy')) s.cd /= 2; } // pièces de l'établi + Frénésie
       this[id](g, p, w, s, dt);
@@ -168,7 +199,7 @@ const Weapons = {
       const ang = a + (n > 1 ? (i / (n - 1) - 0.5) : 0) * s.spread * (w.evo ? 1.3 : 1) + U.rand(-0.04, 0.04);
       const r = this.roll(g, s.dmg);
       g.pBullets.push({ x: p.x, y: p.y, vx: Math.cos(ang) * sp * U.rand(0.9, 1.1), vy: Math.sin(ang) * sp * U.rand(0.9, 1.1),
-        r: 3.2, dmg: r.dmg, crit: r.crit, pierce: w.evo ? 2 : 0, life: s.range / sp, hits: [], pellet: true, kb: 0.6 });
+        r: 3.2, dmg: r.dmg, crit: r.crit, pierce: (w.evo ? 2 : 0) + (p.extraPierce || 0), life: s.range / sp, hits: [], pellet: true, kb: 0.6 });
     }
     g.shake = Math.max(g.shake, 3);
     Sfx.play('shotgun');
@@ -225,7 +256,7 @@ const Weapons = {
       if (n.t >= n.dur) {
         n.dead = true;
         Entities.explode(g, n.tx, n.ty, n.r, n.dmg, { color: '#ff7a1a' });
-        if (n.evo) g.fireZones.push({ x: n.tx, y: n.ty, r: n.r * 0.75, t: 3, max: 3, dps: n.dmg * 0.45, tick: 0 });
+        if (n.fire) g.fireZones.push({ x: n.tx, y: n.ty, r: n.fire.r, t: n.fire.t, max: n.fire.t, dps: n.fire.dps * this.dmgMult(g), tick: 0 });
       }
     }
     U.compact(g.grenades, n => !n.dead);
@@ -270,6 +301,9 @@ const Weapons = {
   mines(g, p, w, s, dt) {
     if (w.t > 0) w.t -= dt;
   },
+  molotov(g, p, w, s, dt) { if (w.t > 0) w.t -= dt; },
+  turretkit(g, p, w, s, dt) { if (w.t > 0) w.t -= dt; },
+  wirekit(g, p, w, s, dt) { if (w.t > 0) w.t -= dt; },
   updateMines(g, dt) {
     for (const m of g.mines) {
       m.age += dt; m.arm -= dt;
